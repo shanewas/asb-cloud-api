@@ -6,6 +6,7 @@ app:
 
 security:
   api_key_hash_algorithm: "argon2"
+  cookie_encryption_key: "${COOKIE_ENCRYPTION_KEY}"
   log_url_domains_only: true
   redact_authorization_headers: true
 
@@ -24,6 +25,7 @@ providers:
   brightdata:
     enabled: false
     api_key: ""
+    zones: [residential]
 
 provider_priority:
   primary: null
@@ -31,6 +33,11 @@ provider_priority:
 
 pool:
   max_workers: 5
+  workers_per_region:
+    jp: 5
+    us: 3
+    eu: 2
+  default_region: jp
   session_ttl_seconds: 300
   idle_timeout_seconds: 60
   prewarm_on_startup: true
@@ -72,6 +79,13 @@ rate_limits:
     requests: 200000
     window_seconds: 86400
     concurrent_sessions: 50
+  enterprise:
+    requests: -1
+    window_seconds: 86400
+    concurrent_sessions: 200
+
+billing:
+  enabled: false
 
 self_hosted:
   enabled: true

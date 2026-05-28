@@ -3,6 +3,19 @@ from typing import Literal
 
 
 @dataclass
+class SessionInfo:
+    session_id: str
+    key_id: str
+    region: str
+    fingerprint: str | None = None
+    cookies: dict = field(default_factory=dict)
+    created_at: float = 0
+    last_used: float = 0
+    request_count: int = 0
+    expires_at: float = 0
+
+
+@dataclass
 class ScrapeRequest:
     url: str
     method: Literal["GET", "POST"] = "GET"

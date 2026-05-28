@@ -26,7 +26,7 @@ class WorkerPool:
         for w in self.workers:
             await w.stop()
 
-    async def acquire(self) -> ASBWorker:
+    async def acquire(self, region: str | None = None) -> ASBWorker:
         await self.semaphore.acquire()
         for w in self.workers:
             if not w._busy:
@@ -37,3 +37,58 @@ class WorkerPool:
     def release(self, worker: ASBWorker):
         worker._busy = False
         self.semaphore.release()
+
+
+class RegionWorkerPool:
+    def __init__(
+        self,
+        workers_per_region: dict[str, int],
+        provider: ProxyProviderInterface,
+        fingerprint_generator: FingerprintGenerator,
+        default_region: str = "jp",
+    ):
+        self.default_region = default_region
+        self.pools: dict[str, asyncio.Semaphore] = {}
+        self.workers: dict[str, list[ASBWorker]] = {}
+        for region, size in workers_per_region.items():
+            self.pools[region] = asyncio.Semaphore(size)
+            self.workers[region] = [
+                ASBWorker(f"worker-{region}-{i}", provider, fingerprint_generator)
+                for i in range(size)
+            ]
+
+    async def start_all(self):
+        for region_workers in self.workers.values():
+            for w in region_workers:
+                await w.start()
+
+    async def stop_all(self):
+        for region_workers in self.workers.values():
+            for w in region_workers:
+                await w.stop()
+
+    async def acquire(self, region: str | None = None) -> ASBWorker:
+        region = region or self.default_region
+        if region not in self.pools:
+            region = self.default_region
+        await self.pools[region].acquire()
+        for w in self.workers[region]:
+            if not getattr(w, "_busy", False):
+                w._busy = True
+                return w
+        self.workers[region][0]._busy = True
+        return self.workers[region][0]
+
+    def release(self, worker: ASBWorker, region: str | None = None):
+        region = region or self.default_region
+        worker._busy = False
+        if region in self.pools:
+            self.pools[region].release()
+
+    def get_status(self) -> dict:
+        status = {}
+        for region, workers in self.workers.items():
+            active = sum(1 for w in workers if getattr(w, "_busy", False))
+            idle = len(workers) - active
+            status[region] = {"active": active, "idle": idle}
+        return status
