@@ -1,8 +1,9 @@
 import hashlib
 import secrets
 import time
+import inspect
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Any
 from fastapi import Header, HTTPException
 
 
@@ -71,15 +72,15 @@ class InMemoryKeyStore:
         ]
 
 
-_key_store: InMemoryKeyStore | None = None
+_key_store: Any = None
 
 
-def set_key_store(store: InMemoryKeyStore):
+def set_key_store(store: Any):
     global _key_store
     _key_store = store
 
 
-def get_key_store() -> InMemoryKeyStore:
+def get_key_store() -> Any:
     if _key_store is None:
         _key_store = InMemoryKeyStore()
     return _key_store
@@ -90,7 +91,12 @@ async def get_api_key(authorization: str = Header(None)) -> str:
         raise HTTPException(status_code=403, detail="Missing Authorization header")
     raw = authorization.removeprefix("Bearer ").strip()
     store = get_key_store()
-    key_id = store.verify(raw)
+    # Support both sync (InMemoryKeyStore) and async (PostgresKeyStore)
+    verify = getattr(store, "verify", None)
+    if verify and inspect.iscoroutinefunction(verify):
+        key_id = await verify(raw)
+    else:
+        key_id = verify(raw) if verify else None
     if not key_id:
         raise HTTPException(status_code=403, detail="Invalid API key")
     return key_id

@@ -1,4 +1,5 @@
 import logging
+import os
 from fastapi import FastAPI
 from asb_api.config import load_config
 from asb_api.providers import ProviderRegistry
@@ -6,12 +7,20 @@ from asb_api.providers.health import CircuitBreaker, ProviderHealthChecker
 from asb_api.fingerprint.generator import FingerprintGenerator
 from asb_api.workers.pool import RegionWorkerPool
 from asb_api.session.store import SessionStore
-from asb_api.api.auth import InMemoryKeyStore, set_key_store
+from asb_api.api.auth import set_key_store
 from asb_api.api.rate_limiter import SlidingWindowLimiter
 from asb_api.api.usage import UsageTracker
 from asb_api.api.routes.scrape import router as scrape_router, set_pool, set_rate_limiter, set_usage_tracker, set_session_store_for_scrape
 from asb_api.api.routes.sessions import router as sessions_router, set_session_store
 from asb_api.api.routes.health import router as health_router, set_health_context
+
+# Phase 2: PostgreSQL persistence
+from asb_api.db import db, run_migrations
+from asb_api.db.auth_store import PostgresKeyStore
+from asb_api.db.rate_limiter import PostgresRateLimiter
+from asb_api.db.session_store import PostgresSessionStore
+from asb_api.db.usage import PostgresUsageTracker
+from asb_api.db.audit import AuditLogger
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +34,20 @@ app.include_router(health_router)
 @app.on_event("startup")
 async def startup():
     config = load_config()
+
+    # === Phase 2: Connect to PostgreSQL and run migrations ===
+    db_cfg = config.get("database", {})
+    dsn = db_cfg.get("dsn") or os.environ.get("DATABASE_URL")
+    if dsn:
+        # Reconfigure singleton pool sizes from config if provided
+        db.dsn = dsn
+        db.min_pool = db_cfg.get("min_pool", 5)
+        db.max_pool = db_cfg.get("max_pool", 20)
+        await db.connect()
+        await run_migrations()
+        logger.info("PostgreSQL connected and migrations applied")
+    else:
+        logger.warning("DATABASE_URL not set — running without persistence (dev only)")
 
     registry = ProviderRegistry()
     registry.initialize_from_config(config.get("providers", {}))
@@ -62,24 +85,56 @@ async def startup():
 
     security_cfg = config.get("security", {})
     encryption_key = security_cfg.get("cookie_encryption_key")
-    s_store = SessionStore(
-        encryption_key=encryption_key,
-        ttl_seconds=pool_cfg.get("session_ttl_seconds", 300),
-    )
-    set_session_store(s_store)
-    set_session_store_for_scrape(s_store)
 
-    key_store = InMemoryKeyStore()
-    raw, _ = key_store.create(tier="free", owner_email="default@asb.local")
-    logger.info(f"Default test API key created: {raw[:12]}...")
-    set_key_store(key_store)
+    # === Phase 2: Wire PostgreSQL-backed stores (replace in-memory) ===
+    if dsn:
+        key_store = PostgresKeyStore()
+        # Create a default test key on startup (idempotent if exists; for dev)
+        try:
+            raw, _ = await key_store.create(tier="free", owner_email="default@asb.local")
+            logger.info(f"Default test API key created: {raw[:12]}...")
+        except Exception:
+            # Key may already exist from previous run (unique hash) — ignore
+            pass
+        set_key_store(key_store)
 
-    limits_cfg = config.get("rate_limits", {})
-    limiter = SlidingWindowLimiter(limits_by_tier=limits_cfg)
-    set_rate_limiter(limiter)
+        limits_cfg = config.get("rate_limits", {})
+        limiter = PostgresRateLimiter(limits_by_tier=limits_cfg)
+        set_rate_limiter(limiter)
 
-    ut = UsageTracker()
-    set_usage_tracker(ut)
+        s_store = PostgresSessionStore(
+            encryption_key=encryption_key,
+            ttl_seconds=pool_cfg.get("session_ttl_seconds", 300),
+        )
+        set_session_store(s_store)
+        set_session_store_for_scrape(s_store)
+
+        ut = PostgresUsageTracker()
+        set_usage_tracker(ut)
+
+        # Audit logger available via from asb_api.db import AuditLogger
+        _ = AuditLogger()
+    else:
+        # Fallback to legacy in-memory (only when no DB)
+        from asb_api.api.auth import InMemoryKeyStore
+        key_store = InMemoryKeyStore()
+        raw, _ = key_store.create(tier="free", owner_email="default@asb.local")
+        logger.info(f"Default test API key created: {raw[:12]}...")
+        set_key_store(key_store)
+
+        limits_cfg = config.get("rate_limits", {})
+        limiter = SlidingWindowLimiter(limits_by_tier=limits_cfg)
+        set_rate_limiter(limiter)
+
+        s_store = SessionStore(
+            encryption_key=encryption_key,
+            ttl_seconds=pool_cfg.get("session_ttl_seconds", 300),
+        )
+        set_session_store(s_store)
+        set_session_store_for_scrape(s_store)
+
+        ut = UsageTracker()
+        set_usage_tracker(ut)
 
     set_health_context(pool, breakers, registry)
 
@@ -89,6 +144,10 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     logger.info("Shutting down ASB Cloud API...")
+    try:
+        await db.disconnect()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

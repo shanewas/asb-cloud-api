@@ -91,3 +91,11 @@ self_hosted:
   enabled: true
   license_key_required: false
   telemetry_enabled: false
+
+# ============================================
+# DATABASE (Phase 2+)
+# ============================================
+database:
+  dsn: "${DATABASE_URL}"
+  min_pool: 5
+  max_pool: 20

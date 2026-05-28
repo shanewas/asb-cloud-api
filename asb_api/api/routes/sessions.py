@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from asb_api.api.auth import get_api_key
 from asb_api.session.store import SessionStore
 
 router = APIRouter()
-session_store: SessionStore | None = None
+session_store: Any = None
 
 
-def set_session_store(store: SessionStore):
+def set_session_store(store: Any):
     global session_store
     session_store = store
 
