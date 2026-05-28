@@ -110,3 +110,22 @@ class PostgresUsageTracker:
             )
         finally:
             await db.pool.release(conn)
+
+    async def check_overage(self, key_id: str, tier: str) -> tuple[bool, int, float]:
+        """Returns (is_overage, overage_requests, overage_cost_usd)."""
+        from asb_api.billing import TIER_MONTHLY_REQUESTS, TIER_OVERAGE_RATE
+        limit = TIER_MONTHLY_REQUESTS.get(tier, 0)
+        if tier in ("free", "enterprise"):
+            return False, 0, 0.0
+
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        usage = await self.get_daily_usage(key_id, today)
+        total = usage.get("total_requests", 0)
+
+        if total <= limit:
+            return False, 0, 0.0
+
+        overage = total - limit
+        rate = TIER_OVERAGE_RATE.get(tier, 0)
+        cost = overage * rate
+        return True, overage, cost

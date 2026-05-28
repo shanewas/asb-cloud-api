@@ -1,24 +1,40 @@
 import hashlib
 import time
 import asyncio
+from typing import Any
 from .connection import db
 
 # Reuse the HTTP-aware exception so rate limits return proper 429 + headers
-from ..api.rate_limiter import RateLimitExceeded
+from ..api.rate_limiter import RateLimitExceeded, OverageLimitExceeded
 
 
 class PostgresRateLimiter:
     """Sliding window rate limiter using PostgreSQL advisory locks for safety."""
 
-    def __init__(self, limits_by_tier: dict[str, dict]):
+    def __init__(self, limits_by_tier: dict[str, dict], usage_tracker: Any = None):
         self.limits_by_tier = limits_by_tier
+        self.usage_tracker = usage_tracker
 
     def _lock_id(self, key_id: str) -> int:
         """Deterministic lock ID from key_id (int32 range for advisory lock)."""
         return int(hashlib.sha256(key_id.encode()).hexdigest()[:12], 16) % (1 << 31)
 
     async def check(self, key_id: str, tier: str = "free") -> tuple[bool, int, int]:
-        """Returns (allowed, remaining, reset_at_unix). Raises RateLimitExceeded on limit."""
+        """Returns (allowed, remaining, reset_at_unix). Raises RateLimitExceeded on limit.
+        Also raises OverageLimitExceeded (402) if monthly overage threshold crossed for paid tiers.
+        """
+        # Phase 3: Overage check (monthly included quota)
+        if self.usage_tracker is not None:
+            try:
+                is_over, _overage_cnt, cost = await self.usage_tracker.check_overage(key_id, tier)
+                if is_over:
+                    raise OverageLimitExceeded(cost)
+            except OverageLimitExceeded:
+                raise
+            except Exception:
+                # If overage check fails (e.g. no data yet), proceed to window rate limit
+                pass
+
         limits = self.limits_by_tier.get(tier, self.limits_by_tier.get("free", {}))
         max_requests = limits.get("requests", 500)
         window_seconds = limits.get("window_seconds", 3600)

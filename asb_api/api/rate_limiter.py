@@ -23,6 +23,18 @@ class RateLimitExceeded(HTTPException):
         )
 
 
+class OverageLimitExceeded(HTTPException):
+    def __init__(self, overage_cost_usd: float):
+        super().__init__(
+            status_code=402,
+            detail={
+                "error_code": "OVERAGE_LIMIT_EXCEEDED",
+                "message": "Usage limit exceeded. Upgrade or pay overage.",
+                "overage_cost_usd": overage_cost_usd,
+            }
+        )
+
+
 class SlidingWindowLimiter:
     def __init__(self, limits_by_tier: dict):
         self.limits_by_tier = limits_by_tier

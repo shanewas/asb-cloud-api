@@ -115,6 +115,13 @@ async def run_migrations():
             );
             CREATE INDEX IF NOT EXISTS idx_audit_key ON audit_log(key_id);
             CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_log(created_at);
+
+            -- Phase 3: Billing / Stripe columns (idempotent)
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS subscription_status TEXT;
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS license_type TEXT;
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS license_key TEXT;
         """)
     finally:
         await db.pool.release(conn)

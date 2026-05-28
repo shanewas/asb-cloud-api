@@ -14,6 +14,9 @@ from asb_api.api.routes.scrape import router as scrape_router, set_pool, set_rat
 from asb_api.api.routes.sessions import router as sessions_router, set_session_store
 from asb_api.api.routes.health import router as health_router, set_health_context
 
+# Phase 3: Billing routes
+from asb_api.api.routes import checkout, webhooks, billing as billing_routes, licenses
+
 # Phase 2: PostgreSQL persistence
 from asb_api.db import db, run_migrations
 from asb_api.db.auth_store import PostgresKeyStore
@@ -29,6 +32,12 @@ app = FastAPI(title="ASB Cloud API")
 app.include_router(scrape_router)
 app.include_router(sessions_router)
 app.include_router(health_router)
+
+# Phase 3: Billing
+app.include_router(checkout.router)
+app.include_router(webhooks.router)
+app.include_router(billing_routes.router)
+app.include_router(licenses.router)
 
 
 @app.on_event("startup")
@@ -98,8 +107,15 @@ async def startup():
             pass
         set_key_store(key_store)
 
+        # Phase 3: wire webhook store (uses same PostgresKeyStore)
+        from asb_api.api.routes.webhooks import set_store as set_webhook_store
+        set_webhook_store(key_store)
+
         limits_cfg = config.get("rate_limits", {})
-        limiter = PostgresRateLimiter(limits_by_tier=limits_cfg)
+        ut = PostgresUsageTracker()
+        set_usage_tracker(ut)
+
+        limiter = PostgresRateLimiter(limits_by_tier=limits_cfg, usage_tracker=ut)
         set_rate_limiter(limiter)
 
         s_store = PostgresSessionStore(
@@ -109,8 +125,6 @@ async def startup():
         set_session_store(s_store)
         set_session_store_for_scrape(s_store)
 
-        ut = PostgresUsageTracker()
-        set_usage_tracker(ut)
 
         # Audit logger available via from asb_api.db import AuditLogger
         _ = AuditLogger()

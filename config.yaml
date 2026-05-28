@@ -91,6 +91,20 @@ self_hosted:
   enabled: true
   license_key_required: false
   telemetry_enabled: false
+  license_secret_key: "${LICENSE_SECRET_KEY}"
+
+# ============================================
+# BILLING / STRIPE (Phase 3)
+# ============================================
+stripe:
+  secret_key: "${STRIPE_SECRET_KEY}"
+  webhook_secret: "${STRIPE_WEBHOOK_SECRET}"
+  price_starter: "${STRIPE_PRICE_STARTER}"
+  price_pro: "${STRIPE_PRICE_PRO}"
+  price_enterprise: "${STRIPE_PRICE_ENTERPRISE}"
+  license_solo: "${STRIPE_LICENSE_SOLO}"
+  license_team: "${STRIPE_LICENSE_TEAM}"
+  license_enterprise: "${STRIPE_LICENSE_ENTERPRISE}"
 
 # ============================================
 # DATABASE (Phase 2+)
