@@ -1,0 +1,79 @@
+app:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "info"
+  debug: false
+
+security:
+  api_key_hash_algorithm: "argon2"
+  log_url_domains_only: true
+  redact_authorization_headers: true
+
+providers:
+  null:
+    enabled: true
+  custom:
+    enabled: false
+    proxies: []
+  decodo:
+    enabled: false
+    api_key: ""
+    pool_size: 10
+    regions: [jp, us, eu]
+    default_region: jp
+  brightdata:
+    enabled: false
+    api_key: ""
+
+provider_priority:
+  primary: null
+  fallback: null
+
+pool:
+  max_workers: 5
+  session_ttl_seconds: 300
+  idle_timeout_seconds: 60
+  prewarm_on_startup: true
+  max_retries_per_request: 2
+
+fingerprint:
+  rotation_strategy: "per_request"
+  default_preset: "general"
+  presets:
+    general:
+      viewport: [1920, 1080]
+      user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      webgl_vendor: "Google Inc. (Intel)"
+      canvas: "noise"
+      accept_language: "en-US,en;q=0.9"
+    japan_ecommerce:
+      viewport: [1920, 1080]
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      webgl_vendor: "Apple Inc."
+      canvas: "noise"
+      accept_language: "ja-JP,ja;q=0.9"
+    mobile_jp:
+      viewport: [390, 844]
+      user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      platform: "iPhone"
+      canvas: "noise"
+      accept_language: "ja-JP,ja;q=0.9"
+
+rate_limits:
+  free:
+    requests: 500
+    window_seconds: 3600
+    concurrent_sessions: 2
+  starter:
+    requests: 25000
+    window_seconds: 86400
+    concurrent_sessions: 10
+  pro:
+    requests: 200000
+    window_seconds: 86400
+    concurrent_sessions: 50
+
+self_hosted:
+  enabled: true
+  license_key_required: false
+  telemetry_enabled: false
