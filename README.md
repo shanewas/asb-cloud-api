@@ -117,11 +117,17 @@ Common environment variables:
 | `ASB_SCREENSHOT_DIR` | No | Screenshot output directory. Defaults to `/tmp/screenshots`. |
 | `STRIPE_SECRET_KEY` | Billing only | Stripe API key. |
 | `STRIPE_WEBHOOK_SECRET` | Billing only | Stripe webhook signature verification. |
+| `STRIPE_PRICE_STARTER` | Billing only | Stripe price ID for starter subscriptions. |
+| `STRIPE_PRICE_PRO` | Billing only | Stripe price ID for pro subscriptions. |
+| `STRIPE_PRICE_ENTERPRISE` | Billing only | Stripe price ID for enterprise subscriptions. |
+| `STRIPE_LICENSE_SOLO` | Billing only | Stripe price ID for solo self-hosted licenses. |
+| `STRIPE_LICENSE_TEAM` | Billing only | Stripe price ID for team self-hosted licenses. |
+| `STRIPE_LICENSE_ENTERPRISE` | Billing only | Stripe price ID for enterprise self-hosted licenses. |
 | `LICENSE_SECRET_KEY` | License only | Self-hosted license verification secret. |
 
 See [.env.example](.env.example) for a full template.
 
-Stripe billing routes are mounted only when `billing.enabled` is `true` in `config.yaml`. License verification remains available separately and requires `LICENSE_SECRET_KEY`.
+Stripe billing routes are mounted only when `billing.enabled` is `true` in `config.yaml`. License verification remains available separately and requires `LICENSE_SECRET_KEY`. See [docs/BILLING_TEST_MODE.md](docs/BILLING_TEST_MODE.md) before enabling Stripe-backed billing in a shared environment.
 
 ## API Key Storage
 
@@ -134,6 +140,7 @@ Run the lightweight checks:
 ```bash
 python -m compileall -q asb_api tests
 python -m unittest discover -s tests -v
+python -m pytest
 ```
 
 Generate a Clawpatch report if the local provider is available:

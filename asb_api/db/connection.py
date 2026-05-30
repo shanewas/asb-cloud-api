@@ -122,6 +122,12 @@ async def run_migrations():
             ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS subscription_status TEXT;
             ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS license_type TEXT;
             ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS license_key TEXT;
+
+            CREATE TABLE IF NOT EXISTS stripe_events (
+                event_id       TEXT PRIMARY KEY,
+                event_type     TEXT NOT NULL,
+                processed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
         """)
     finally:
         await db.pool.release(conn)

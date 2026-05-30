@@ -1,20 +1,16 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Literal
-import os
-import stripe as stripe_lib
 
 from asb_api.billing import (
-    TIER_TO_PRICE,
-    SOLO_LICENSE_PRICE_ID,
-    TEAM_LICENSE_PRICE_ID,
-    ENTERPRISE_LICENSE_PRICE_ID,
+    get_license_price_id,
+    get_tier_price_id,
 )
+from asb_api.billing.stripe_client import get_stripe
 from asb_api.api.auth import get_api_key
 
 
 router = APIRouter()
-stripe_lib.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
 class CheckoutRequest(BaseModel):
@@ -31,13 +27,17 @@ class CheckoutResponse(BaseModel):
 @router.post("/v1/billing/checkout", response_model=CheckoutResponse)
 async def create_checkout(
     request: CheckoutRequest,
-    _: str = Depends(get_api_key),  # must be logged in
+    authenticated_key_id: str = Depends(get_api_key),  # must be logged in
 ):
-    price_id = TIER_TO_PRICE.get(request.tier)
+    if request.key_id != authenticated_key_id:
+        raise HTTPException(403, "Cannot create checkout for another API key")
+
+    price_id = get_tier_price_id(request.tier)
     if not price_id:
         raise HTTPException(400, "Invalid tier")
 
     try:
+        stripe_lib = get_stripe()
         session = stripe_lib.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{"price": price_id, "quantity": 1}],
@@ -63,21 +63,21 @@ class LicenseCheckoutRequest(BaseModel):
 
 @router.post("/v1/billing/license-checkout", response_model=CheckoutResponse)
 async def create_license_checkout(request: LicenseCheckoutRequest):
-    price_id = {
-        "solo": SOLO_LICENSE_PRICE_ID,
-        "team": TEAM_LICENSE_PRICE_ID,
-        "enterprise": ENTERPRISE_LICENSE_PRICE_ID,
-    }.get(request.license_type)
+    price_id = get_license_price_id(request.license_type)
     if not price_id:
         raise HTTPException(400, "Invalid license type")
 
     try:
+        stripe_lib = get_stripe()
         session = stripe_lib.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="payment",  # one-time
             customer_email=request.email,
-            success_url="https://asbcloud.io/success?license_type={LICENSE_TYPE}",
+            success_url=(
+                "https://asbcloud.io/success"
+                f"?session_id={{CHECKOUT_SESSION_ID}}&license_type={request.license_type}"
+            ),
             cancel_url="https://asbcloud.io/self-hosted",
             metadata={"license_type": request.license_type},
         )

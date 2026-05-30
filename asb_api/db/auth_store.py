@@ -101,14 +101,38 @@ class PostgresKeyStore:
         finally:
             await db.pool.release(conn)
 
-    async def upgrade_tier(self, key_id: str, tier: str, stripe_subscription_id: str | None = None):
+    async def upgrade_tier(
+        self,
+        key_id: str,
+        tier: str,
+        stripe_subscription_id: str | None = None,
+        stripe_customer_id: str | None = None,
+    ):
         conn = await db.pool.acquire()
         try:
             await conn.execute(
-                """UPDATE api_keys SET tier = $1, stripe_subscription_id = $2, subscription_status = 'active'
-                   WHERE key_id = $3""",
-                tier, stripe_subscription_id, key_id
+                """UPDATE api_keys
+                   SET tier = $1,
+                       stripe_subscription_id = $2,
+                       stripe_customer_id = COALESCE($3, stripe_customer_id),
+                       subscription_status = 'active'
+                   WHERE key_id = $4""",
+                tier, stripe_subscription_id, stripe_customer_id, key_id
             )
+        finally:
+            await db.pool.release(conn)
+
+    async def try_record_stripe_event(self, event_id: str, event_type: str) -> bool:
+        conn = await db.pool.acquire()
+        try:
+            row = await conn.fetchrow(
+                """INSERT INTO stripe_events (event_id, event_type)
+                   VALUES ($1, $2)
+                   ON CONFLICT (event_id) DO NOTHING
+                   RETURNING event_id""",
+                event_id, event_type
+            )
+            return row is not None
         finally:
             await db.pool.release(conn)
 
