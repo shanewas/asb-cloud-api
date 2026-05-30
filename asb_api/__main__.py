@@ -1,6 +1,7 @@
 import logging
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from asb_api.config import load_config
 from asb_api.providers import ProviderRegistry
 from asb_api.providers.health import CircuitBreaker, ProviderHealthChecker
@@ -21,6 +22,32 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ASB Cloud API")
 install_error_handlers(app)
+
+# CORS for explicit dashboard origins only (secure default: no middleware if unset).
+# Supports DASHBOARD_ORIGINS env (comma-separated) or dashboard.origins in config.yaml.
+# No wildcard ever. See docs/DASHBOARD_ARCHITECTURE.md §7.
+_config_for_cors = load_config()
+_dash_origins_raw = os.environ.get("DASHBOARD_ORIGINS", "").strip()
+if _dash_origins_raw:
+    _dash_origins = [o.strip() for o in _dash_origins_raw.split(",") if o.strip()]
+else:
+    _dash = _config_for_cors.get("dashboard", {}) or {}
+    _origins = _dash.get("origins", []) or []
+    if isinstance(_origins, str):
+        _dash_origins = [o.strip() for o in _origins.split(",") if o.strip()]
+    else:
+        _dash_origins = [str(o).strip() for o in _origins if str(o).strip()]
+if _dash_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_dash_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
+    logging.getLogger(__name__).info(f"CORS enabled for dashboard origins: {_dash_origins}")
+else:
+    logging.getLogger(__name__).info("CORS disabled (no dashboard.origins / DASHBOARD_ORIGINS; secure default)")
 
 app.include_router(scrape_router)
 app.include_router(sessions_router)
@@ -104,6 +131,10 @@ async def startup():
 
     security_cfg = config.get("security", {})
     encryption_key = security_cfg.get("cookie_encryption_key")
+
+    # Wire security config (URL safety + log redaction rules) for use by routes and utilities
+    from asb_api.security import set_security_config
+    set_security_config(config)
 
     # === Phase 2: Wire PostgreSQL-backed stores (replace in-memory) ===
     if dsn:

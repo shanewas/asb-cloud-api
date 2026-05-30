@@ -1,6 +1,5 @@
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends
-from urllib.parse import urlparse
 from typing import Any
 from asb_api.session.models import (
     ScrapeRequest, ScrapeResponse,
@@ -13,13 +12,15 @@ from asb_api.api.usage import UsageTracker
 from asb_api.session.store import SessionStore
 from asb_api.api.routes.sessions import ensure_session_owner
 from asb_api.api.errors import APIError
-from asb_api.security import validate_scrape_url
+from asb_api.security import validate_scrape_url, redact_url_for_logging
 
 router = APIRouter()
 pool: RegionWorkerPool | None = None
 rate_limiter: Any = None
 usage_tracker: Any = None
 session_store: Any = None
+MAX_BULK_ITEMS = 50
+MAX_BULK_CONCURRENCY = 16
 
 
 def set_pool(p: RegionWorkerPool):
@@ -40,6 +41,38 @@ def set_session_store_for_scrape(ss: Any):
     session_store = ss
 
 
+async def _get_key_tier(key_id: str) -> str:
+    key_store = get_key_store()
+    api_key = key_store.get(key_id)
+    if hasattr(api_key, "__await__"):
+        api_key = await api_key
+    return api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
+
+
+async def _check_rate_limit_units(key_id: str, tier: str, units: int = 1) -> None:
+    if not rate_limiter:
+        return
+    units = max(1, units)
+    check_many = getattr(rate_limiter, "check_many", None)
+    if units > 1 and callable(check_many):
+        await check_many(key_id, tier=tier, count=units)
+        return
+    for _ in range(units):
+        await rate_limiter.check(key_id, tier)
+
+
+def _bulk_error_from_http_exception(exc: HTTPException) -> dict:
+    if isinstance(exc.detail, dict):
+        return {
+            "error_code": exc.detail.get("error_code", "BAD_REQUEST"),
+            "message": exc.detail.get("message", str(exc.detail)),
+        }
+    return {
+        "error_code": "WORKER_ERROR" if exc.status_code >= 500 else "BAD_REQUEST",
+        "message": str(exc.detail),
+    }
+
+
 # Internal helper containing the core single-scrape logic (after rate-limit check).
 # Used by both the single /v1/scrape and the bulk endpoint.
 async def _execute_one_scrape(
@@ -53,12 +86,8 @@ async def _execute_one_scrape(
     validate_scrape_url(request.url)
 
     if not skip_rate_limit_check and rate_limiter:
-        key_store = get_key_store()
-        api_key = key_store.get(key_id)
-        if hasattr(api_key, "__await__"):
-            api_key = await api_key
-        tier = api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
-        await rate_limiter.check(key_id, tier)
+        tier = await _get_key_tier(key_id)
+        await _check_rate_limit_units(key_id, tier)
 
     if not pool:
         raise APIError(503, "SERVICE_NOT_INITIALIZED", "Worker pool or backing service is unavailable")
@@ -94,7 +123,7 @@ async def _execute_one_scrape(
             if hasattr(usage_tracker, "record"):
                 domain = None
                 try:
-                    domain = urlparse(request.url).netloc or request.url.split("/")[2] if "://" in request.url else request.url.split("/")[0]
+                    domain = redact_url_for_logging(request.url, domains_only=True)
                 except Exception:
                     domain = None
                 meta = getattr(result, "metadata", None)
@@ -135,22 +164,19 @@ async def bulk_scrape(
 ):
     items = payload.items
     if not items:
-        raise HTTPException(status_code=400, detail="items array must not be empty")
+        raise APIError(400, "BAD_REQUEST", "items array must not be empty")
+    if len(items) > MAX_BULK_ITEMS:
+        raise APIError(400, "BAD_REQUEST", f"bulk scrape supports at most {MAX_BULK_ITEMS} items")
 
     # Batch rate limit check: consume exactly N = len(items) quota units up front.
     # If any single check fails (429), the whole batch is rejected before any execution.
     # This matches the documented contract (per-item accounting for bulk).
     if rate_limiter:
-        key_store = get_key_store()
-        api_key = key_store.get(key_id)
-        if hasattr(api_key, "__await__"):
-            api_key = await api_key
-        tier = api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
-        for _ in range(len(items)):
-            await rate_limiter.check(key_id, tier)
+        tier = await _get_key_tier(key_id)
+        await _check_rate_limit_units(key_id, tier, units=len(items))
 
     # Execute items with bounded concurrency
-    max_conc = max(1, min(payload.max_concurrency or 8, 32))
+    max_conc = max(1, min(payload.max_concurrency or 8, MAX_BULK_CONCURRENCY))
     semaphore = asyncio.Semaphore(max_conc)
 
     async def _run_one(index: int, req: ScrapeRequest) -> BulkItemResult:
@@ -159,9 +185,7 @@ async def bulk_scrape(
                 res = await _execute_one_scrape(req, key_id, skip_rate_limit_check=True)
                 return BulkItemResult(index=index, result=res, error=None)
             except HTTPException as e:
-                # Convert to standardized error shape for the bulk result
-                err = {"error_code": "WORKER_ERROR" if e.status_code >= 500 else "BAD_REQUEST", "message": str(e.detail)}
-                return BulkItemResult(index=index, result=None, error=err)
+                return BulkItemResult(index=index, result=None, error=_bulk_error_from_http_exception(e))
             except Exception as e:
                 return BulkItemResult(
                     index=index,

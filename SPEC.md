@@ -13,7 +13,7 @@ The first releasable version must prove one narrow promise:
 
 > An authenticated customer can call `POST /v1/scrape` and receive a reliable browser-rendered response with predictable rate limits, session behavior, provider routing, usage tracking, and deployable self-hosted packaging.
 
-This release must not depend on dashboard, SDK, Redis, multi-region orchestration, or automated signup. Those are post-release features.
+This release must not depend on dashboard, Redis, multi-region orchestration, or automated signup. SDKs/CLI were added post-v1 (see clients/ and GitHub issue #10).
 
 ## 2. Release Scope
 
@@ -36,10 +36,10 @@ This release must not depend on dashboard, SDK, Redis, multi-region orchestratio
 
 ### Out of Scope for v1
 
-- Customer dashboard.
+- Customer dashboard (see [docs/DASHBOARD_ARCHITECTURE.md](docs/DASHBOARD_ARCHITECTURE.md) for architecture proposal).
 - Self-service signup.
-- Python, Node, or CLI SDKs.
-- Bulk scrape endpoint (see design + implementation in section 7; closes #11).
+- ~~Python, Node, or CLI SDKs~~ (implemented post-v1; see clients/ and issue #10).
+- ~~Bulk scrape endpoint~~ (implemented post-v1; see design + API details in section 7 and issue #11).
 - Redis rate limiting (see [docs/REDIS_RATE_LIMITING.md](docs/REDIS_RATE_LIMITING.md) for evaluation and migration plan).
 - ClickHouse or analytics warehouse.
 - Auto-scaling and multi-VPS worker scheduling.
@@ -299,9 +299,9 @@ Error response body for worker-level failures:
 }
 ```
 
-### `POST /v1/bulk-scrape` (Post-v1 — Design)
+### `POST /v1/bulk-scrape` (Post-v1)
 
-**Status**: Design accepted. Implementation is post-v1 work.
+**Status**: Implemented.
 
 **Rationale for chosen approach (answers the open questions in issue #11)**:
 - **Synchronous batch response** (not async job model) for the initial version. This keeps the feature simple, reuses all existing single-request infrastructure (auth, rate limiting, sessions, worker pool, usage tracking), and provides immediate results. An async `/v1/jobs` + webhook model can be added later if needed for very large batches.
@@ -376,7 +376,7 @@ Error response body for worker-level failures:
 - 503 `SERVICE_NOT_INITIALIZED`
 
 **Limits (enforced server-side, documented in README later)**:
-- Max batch size: 50 (configurable via future admin settings)
+- Max batch size: 50
 - Max `max_concurrency`: 16
 
 This design reuses `ScrapeRequest` and `ScrapeResponse` directly for items/results, minimizing new surface area.

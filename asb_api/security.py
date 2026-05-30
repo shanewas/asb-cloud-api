@@ -6,6 +6,7 @@ Implements controls from SPEC.md and issue #8.
 from __future__ import annotations
 
 import ipaddress
+import socket
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -63,6 +64,35 @@ PRIVATE_HOSTNAMES = {
     "169.254.169.254",  # AWS, GCP, Azure metadata
 }
 
+
+def _is_private_address(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.strip("[]"))
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _resolved_host_addresses(host: str) -> set[str]:
+    try:
+        results = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, socket.gaierror):
+        return set()
+
+    addresses = set()
+    for result in results:
+        sockaddr = result[4]
+        if sockaddr:
+            addresses.add(sockaddr[0])
+    return addresses
+
+
 def _is_private_or_localhost(host: str) -> bool:
     """Best-effort check for private, loopback, or dangerous internal hosts."""
     if not host:
@@ -70,17 +100,15 @@ def _is_private_or_localhost(host: str) -> bool:
     host_lower = host.lower().strip("[]")
     if host_lower in PRIVATE_HOSTNAMES:
         return True
-    # IP literal?
-    try:
-        ip = ipaddress.ip_address(host_lower)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-    except ValueError:
-        pass
-    # Common internal patterns (best effort; full DNS resolution + blocking is a deployment concern)
+    if _is_private_address(host_lower):
+        return True
+    # Common internal patterns (best effort; network egress policy should still enforce this).
     if host_lower.endswith((".local", ".internal", ".lan")):
         return True
     if any(x in host_lower for x in ("metadata", "169.254", "10.", "192.168.", "172.16.", "172.17.", "172.18.")):
         # Rough heuristic; real protection should be at network layer for cloud
+        return True
+    if any(_is_private_address(address) for address in _resolved_host_addresses(host_lower)):
         return True
     return False
 

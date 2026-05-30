@@ -1,0 +1,33 @@
+{
+  "name": "asb-cloud-client",
+  "version": "0.1.0",
+  "description": "Thin Node.js client for the ASB Cloud API (scrape, sessions, usage, billing).",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.js",
+    "smoke": "node test/smoke.js"
+  },
+  "keywords": [
+    "asb",
+    "scraping",
+    "browser",
+    "api-client"
+  ],
+  "author": "ASB Cloud API contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shanewas/asb-cloud-api.git",
+    "directory": "clients/node"
+  },
+  "homepage": "https://github.com/shanewas/asb-cloud-api/blob/master/clients/README.md",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

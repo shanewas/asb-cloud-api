@@ -179,6 +179,20 @@ class APIErrorContractTests(unittest.TestCase):
         self.assertEqual(body.get("error_code"), "BAD_REQUEST")
 
 
+class CORSCONFIGTests(unittest.TestCase):
+    """Verify CORS middleware is gated by explicit origins only (no wildcard, secure default)."""
+
+    def test_no_cors_headers_when_no_dashboard_origins_configured(self):
+        # In test env (and default config) no DASHBOARD_ORIGINS / dashboard.origins is set.
+        # Therefore CORSMiddleware should not be present -> no ACAO header on responses.
+        client = TestClient(app)
+        resp = client.get("/v1/health")
+        self.assertEqual(resp.status_code, 200)
+        # Should not have wildcard or any ACAO from our middleware
+        acao = resp.headers.get("access-control-allow-origin")
+        self.assertIsNone(acao, f"Expected no ACAO header in secure-default mode, got {acao}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
@@ -297,10 +311,6 @@ class BulkScrapeSmokeTests(unittest.TestCase):
         lim = SlidingWindowLimiter(limits_by_tier=limits)
         set_rate_limiter(lim)
 
-        # exhaust the 1
-        lim2 = SlidingWindowLimiter(limits_by_tier=limits)
-        # but since per-key, just submit 2-item bulk; first check should pass, second fail -> whole rejected
-        # Actually the pre-N checks happen before any exec.
         client = TestClient(app)
         auth = f"Bearer {raw}"
 
@@ -318,3 +328,39 @@ class BulkScrapeSmokeTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 429)
         body = resp.json()
         self.assertEqual(body.get("error_code"), "RATE_LIMIT_EXCEEDED")
+
+        # Rejection must not partially consume the one remaining unit.
+        single = client.post(
+            "/v1/scrape",
+            json={"url": "https://example.com/after-reject", "method": "GET"},
+            headers={"Authorization": auth},
+        )
+        self.assertEqual(single.status_code, 200)
+
+    def test_bulk_rejects_more_than_max_items(self):
+        resp = self.client.post(
+            "/v1/bulk-scrape",
+            json={
+                "items": [
+                    {"url": f"https://example.com/{idx}", "method": "GET"}
+                    for idx in range(51)
+                ]
+            },
+            headers={"Authorization": self.auth},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        body = resp.json()
+        self.assertEqual(body.get("error_code"), "BAD_REQUEST")
+
+    def test_bulk_preserves_per_item_validation_error_code(self):
+        resp = self.client.post(
+            "/v1/bulk-scrape",
+            json={"items": [{"url": "file:///etc/passwd", "method": "GET"}]},
+            headers={"Authorization": self.auth},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["summary"]["failed"], 1)
+        self.assertEqual(data["results"][0]["error"]["error_code"], "INVALID_URL_SCHEME")
