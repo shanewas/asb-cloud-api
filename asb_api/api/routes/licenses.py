@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import os
 
 from asb_api.billing.license import SelfHostedLicense
+from asb_api.api.errors import APIError
 
 
 router = APIRouter()
@@ -18,9 +19,9 @@ class VerifyLicenseRequest(BaseModel):
 async def verify_license(request: VerifyLicenseRequest):
     secret = os.environ.get("LICENSE_SECRET_KEY", "")
     if not secret:
-        raise HTTPException(500, "LICENSE_SECRET_KEY not configured")
+        raise APIError(500, "INTERNAL_ERROR", "LICENSE_SECRET_KEY not configured")
     lic = SelfHostedLicense(secret)
     valid, error = lic.verify_full(request.license_key, request.license_type, request.domain)
     if not valid:
-        raise HTTPException(400, error)
+        raise APIError(400, "BAD_REQUEST", error or "License verification failed")
     return {"valid": True}

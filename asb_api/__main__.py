@@ -14,11 +14,14 @@ from asb_api.api.routes.scrape import router as scrape_router, set_pool, set_rat
 from asb_api.api.routes.sessions import router as sessions_router, set_session_store
 from asb_api.api.routes.health import router as health_router, set_health_context
 from asb_api.api.routes.usage import router as usage_router, set_usage_context
+from asb_api.api.errors import install_error_handlers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ASB Cloud API")
+install_error_handlers(app)
+
 app.include_router(scrape_router)
 app.include_router(sessions_router)
 app.include_router(health_router)

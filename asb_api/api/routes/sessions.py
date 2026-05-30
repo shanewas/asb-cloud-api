@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, Any
 from asb_api.api.auth import get_api_key
 from asb_api.session.store import SessionStore
+from asb_api.api.errors import APIError
 
 router = APIRouter()
 session_store: Any = None
@@ -29,7 +30,7 @@ async def create_session(
     key_id: str = Depends(get_api_key),
 ):
     if not session_store:
-        raise HTTPException(503, "Session store not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Session store not initialized")
     session = await session_store.create(
         key_id=key_id,
         region=request.region,
@@ -45,10 +46,10 @@ async def create_session(
 @router.get("/v1/sessions/{session_id}")
 async def get_session(session_id: str, key_id: str = Depends(get_api_key)):
     if not session_store:
-        raise HTTPException(503, "Session store not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Session store not initialized")
     session = await session_store.get(session_id)
     if not session:
-        raise HTTPException(404, "Session not found")
+        raise APIError(404, "SESSION_NOT_FOUND", "Session does not exist, expired, or is not owned by the key")
     ensure_session_owner(session, key_id)
     return {
         "session_id": session.session_id,
@@ -64,10 +65,10 @@ async def get_session(session_id: str, key_id: str = Depends(get_api_key)):
 @router.delete("/v1/sessions/{session_id}")
 async def delete_session(session_id: str, key_id: str = Depends(get_api_key)):
     if not session_store:
-        raise HTTPException(503, "Session store not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Session store not initialized")
     session = await session_store.get(session_id)
     if not session:
-        raise HTTPException(404, "Session not found")
+        raise APIError(404, "SESSION_NOT_FOUND", "Session does not exist, expired, or is not owned by the key")
     ensure_session_owner(session, key_id)
     await session_store.delete(session_id)
     return Response(status_code=204)

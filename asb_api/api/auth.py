@@ -5,6 +5,7 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Literal, Any
 from fastapi import Header, HTTPException
+from asb_api.api.errors import APIError
 
 
 @dataclass
@@ -89,7 +90,7 @@ def get_key_store() -> Any:
 
 async def get_api_key(authorization: str = Header(None)) -> str:
     if not authorization:
-        raise HTTPException(status_code=403, detail="Missing Authorization header")
+        raise APIError(403, "MISSING_AUTH", "Authorization header missing")
     raw = authorization.removeprefix("Bearer ").strip()
     store = get_key_store()
     # Support both sync (InMemoryKeyStore) and async (PostgresKeyStore)
@@ -99,5 +100,5 @@ async def get_api_key(authorization: str = Header(None)) -> str:
     else:
         key_id = verify(raw) if verify else None
     if not key_id:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+        raise APIError(403, "INVALID_API_KEY", "API key is invalid or revoked")
     return key_id
