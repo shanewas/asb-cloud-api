@@ -1,6 +1,10 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Any
-from asb_api.session.models import ScrapeRequest, ScrapeResponse
+from asb_api.session.models import (
+    ScrapeRequest, ScrapeResponse,
+    BulkScrapeRequest, BulkItemResult, BulkScrapeResponse
+)
 from asb_api.workers.pool import RegionWorkerPool
 from asb_api.api.auth import get_api_key, get_key_store
 from asb_api.api.rate_limiter import SlidingWindowLimiter
@@ -15,6 +19,8 @@ pool: RegionWorkerPool | None = None
 rate_limiter: Any = None
 usage_tracker: Any = None
 session_store: Any = None
+MAX_BULK_ITEMS = 50
+MAX_BULK_CONCURRENCY = 16
 
 
 def set_pool(p: RegionWorkerPool):
@@ -35,26 +41,53 @@ def set_session_store_for_scrape(ss: Any):
     session_store = ss
 
 
-@router.post("/v1/scrape", response_model=ScrapeResponse)
-async def scrape(
-    request: ScrapeRequest,
-    key_id: str = Depends(get_api_key),
-):
-    # URL safety check (scheme + optional private network block) — must happen before any worker or external work
-    validate_scrape_url(request.url)
-
+async def _get_key_tier(key_id: str) -> str:
     key_store = get_key_store()
-    # Support async (Postgres) or sync (InMemory) get()
     api_key = key_store.get(key_id)
     if hasattr(api_key, "__await__"):
-        api_key = await api_key  # in case future
-    if isinstance(api_key, dict):
-        tier = api_key.get("tier", "free")
-    else:
-        tier = getattr(api_key, "tier", "free")
+        api_key = await api_key
+    return api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
 
-    if rate_limiter:
+
+async def _check_rate_limit_units(key_id: str, tier: str, units: int = 1) -> None:
+    if not rate_limiter:
+        return
+    units = max(1, units)
+    check_many = getattr(rate_limiter, "check_many", None)
+    if units > 1 and callable(check_many):
+        await check_many(key_id, tier=tier, count=units)
+        return
+    for _ in range(units):
         await rate_limiter.check(key_id, tier)
+
+
+def _bulk_error_from_http_exception(exc: HTTPException) -> dict:
+    if isinstance(exc.detail, dict):
+        return {
+            "error_code": exc.detail.get("error_code", "BAD_REQUEST"),
+            "message": exc.detail.get("message", str(exc.detail)),
+        }
+    return {
+        "error_code": "WORKER_ERROR" if exc.status_code >= 500 else "BAD_REQUEST",
+        "message": str(exc.detail),
+    }
+
+
+# Internal helper containing the core single-scrape logic (after rate-limit check).
+# Used by both the single /v1/scrape and the bulk endpoint.
+async def _execute_one_scrape(
+    request: ScrapeRequest,
+    key_id: str,
+    skip_rate_limit_check: bool = False,
+) -> ScrapeResponse:
+    """Core execution path for one scrape request. Does NOT perform rate limiting when skip_rate_limit_check=True."""
+    # URL safety validation (from #8) — applies to both single scrape and every bulk item.
+    # Happens before rate limiting or worker acquisition.
+    validate_scrape_url(request.url)
+
+    if not skip_rate_limit_check and rate_limiter:
+        tier = await _get_key_tier(key_id)
+        await _check_rate_limit_units(key_id, tier)
 
     if not pool:
         raise APIError(503, "SERVICE_NOT_INITIALIZED", "Worker pool or backing service is unavailable")
@@ -87,7 +120,6 @@ async def scrape(
             await session_store.increment_count(request.session_id)
 
         if usage_tracker:
-            # Phase 2 rich record if available (PostgresUsageTracker), else legacy increment
             if hasattr(usage_tracker, "record"):
                 domain = None
                 try:
@@ -115,3 +147,63 @@ async def scrape(
         return result
     finally:
         pool.release(worker, request.region)
+
+
+@router.post("/v1/scrape", response_model=ScrapeResponse)
+async def scrape(
+    request: ScrapeRequest,
+    key_id: str = Depends(get_api_key),
+):
+    return await _execute_one_scrape(request, key_id, skip_rate_limit_check=False)
+
+
+@router.post("/v1/bulk-scrape", response_model=BulkScrapeResponse)
+async def bulk_scrape(
+    payload: BulkScrapeRequest,
+    key_id: str = Depends(get_api_key),
+):
+    items = payload.items
+    if not items:
+        raise APIError(400, "BAD_REQUEST", "items array must not be empty")
+    if len(items) > MAX_BULK_ITEMS:
+        raise APIError(400, "BAD_REQUEST", f"bulk scrape supports at most {MAX_BULK_ITEMS} items")
+
+    # Batch rate limit check: consume exactly N = len(items) quota units up front.
+    # If any single check fails (429), the whole batch is rejected before any execution.
+    # This matches the documented contract (per-item accounting for bulk).
+    if rate_limiter:
+        tier = await _get_key_tier(key_id)
+        await _check_rate_limit_units(key_id, tier, units=len(items))
+
+    # Execute items with bounded concurrency
+    max_conc = max(1, min(payload.max_concurrency or 8, MAX_BULK_CONCURRENCY))
+    semaphore = asyncio.Semaphore(max_conc)
+
+    async def _run_one(index: int, req: ScrapeRequest) -> BulkItemResult:
+        async with semaphore:
+            try:
+                res = await _execute_one_scrape(req, key_id, skip_rate_limit_check=True)
+                return BulkItemResult(index=index, result=res, error=None)
+            except HTTPException as e:
+                return BulkItemResult(index=index, result=None, error=_bulk_error_from_http_exception(e))
+            except Exception as e:
+                return BulkItemResult(
+                    index=index,
+                    result=None,
+                    error={"error_code": "INTERNAL_ERROR", "message": str(e)}
+                )
+
+    tasks = [_run_one(i, item) for i, item in enumerate(items)]
+    results = await asyncio.gather(*tasks)
+
+    succeeded = sum(1 for r in results if r.result is not None and r.result.status == "success")
+    failed = len(results) - succeeded
+
+    return BulkScrapeResponse(
+        results=results,
+        summary={
+            "total": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+        },
+    )

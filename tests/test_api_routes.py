@@ -195,3 +195,172 @@ class CORSCONFIGTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ---------------------------------------------------------------------------
+# Basic bulk-scrape smoke tests (issue #11 design) - integrated during rebase
+# These use the same minimal in-memory wiring pattern as other route tests.
+# They verify the new endpoint shape, partial success, and per-item results.
+# NOTE: rate limit test here is basic; stronger quota-exhaustion test added below.
+# ---------------------------------------------------------------------------
+
+
+class _DummyWorker:
+    async def scrape(self, req):
+        from asb_api.session.models import ScrapeResponse, ScrapeMetadata
+        status = "success"
+        html = f"<html>ok from {req.url}</html>"
+        if "fail" in req.url:
+            status = "error"
+        return ScrapeResponse(
+            request_id="bulk_test",
+            status=status,
+            html=html if status == "success" else None,
+            metadata=ScrapeMetadata(
+                request_id="bulk_test", provider="null", region=req.region or "jp",
+                fingerprint_id="test", worker_id="w0", duration_ms=5,
+                block_detected=False, retries=0
+            ),
+            error_code="WORKER_ERROR" if status == "error" else None,
+            message="simulated failure" if status == "error" else None,
+        )
+
+
+class _DummyPool:
+    async def acquire(self, region=None):
+        return _DummyWorker()
+    def release(self, worker, region=None):
+        pass
+    def get_status(self):
+        return {"jp": {"active": 0, "idle": 2}}
+
+
+def _setup_bulk_test_client():
+    ks = InMemoryKeyStore()
+    raw, _ = ks.create(tier="starter")
+    set_key_store(ks)
+
+    limits = {"starter": {"requests": 100, "window_seconds": 3600}}
+    lim = SlidingWindowLimiter(limits_by_tier=limits)
+    set_rate_limiter(lim)
+
+    ss = SessionStore(encryption_key=None, ttl_seconds=300)
+    set_session_store(ss)
+    set_session_store_for_scrape(ss)
+
+    ut = UsageTracker()
+    set_usage_tracker(ut)
+    set_usage_ctx(ut, limits)
+
+    set_pool(_DummyPool())
+
+    client = TestClient(app)
+    return client, f"Bearer {raw}"
+
+
+class BulkScrapeSmokeTests(unittest.TestCase):
+    def setUp(self):
+        self.client, self.auth = _setup_bulk_test_client()
+
+    def test_bulk_happy_path_and_partial_failure(self):
+        resp = self.client.post(
+            "/v1/bulk-scrape",
+            json={
+                "items": [
+                    {"url": "https://example.com/1", "method": "GET"},
+                    {"url": "https://example.com/fail-me", "method": "GET"},
+                    {"url": "https://example.com/3", "method": "GET"},
+                ],
+                "max_concurrency": 2,
+            },
+            headers={"Authorization": self.auth},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+
+        self.assertEqual(data["summary"]["total"], 3)
+        self.assertEqual(data["summary"]["succeeded"], 2)
+        self.assertEqual(data["summary"]["failed"], 1)
+
+        # Check per-item shape
+        r0 = data["results"][0]
+        self.assertEqual(r0["index"], 0)
+        self.assertIsNotNone(r0["result"])
+        self.assertIsNone(r0["error"])
+        self.assertIn("example.com/1", r0["result"]["html"])
+
+        r1 = data["results"][1]
+        self.assertEqual(r1["index"], 1)
+        self.assertIsNotNone(r1["result"])
+        self.assertEqual(r1["result"]["status"], "error")
+        self.assertEqual(r1["result"]["error_code"], "WORKER_ERROR")
+        self.assertIsNone(r1["error"])
+
+        r2 = data["results"][2]
+        self.assertEqual(r2["index"], 2)
+        self.assertIsNotNone(r2["result"])
+
+    def test_bulk_rate_limit_rejects_whole_batch(self):
+        # Use a fresh client with tiny (1 request) limit to verify N=2 batch is rejected when only 1 remains.
+        ks = InMemoryKeyStore()
+        raw, _ = ks.create(tier="starter")
+        set_key_store(ks)
+
+        limits = {"starter": {"requests": 1, "window_seconds": 3600}}  # only 1 allowed
+        lim = SlidingWindowLimiter(limits_by_tier=limits)
+        set_rate_limiter(lim)
+
+        client = TestClient(app)
+        auth = f"Bearer {raw}"
+
+        resp = client.post(
+            "/v1/bulk-scrape",
+            json={
+                "items": [
+                    {"url": "https://example.com/1", "method": "GET"},
+                    {"url": "https://example.com/2", "method": "GET"},
+                ]
+            },
+            headers={"Authorization": auth},
+        )
+        # With only 1 quota, batch of 2 must be rejected with 429 before any item runs
+        self.assertEqual(resp.status_code, 429)
+        body = resp.json()
+        self.assertEqual(body.get("error_code"), "RATE_LIMIT_EXCEEDED")
+
+        # Rejection must not partially consume the one remaining unit.
+        single = client.post(
+            "/v1/scrape",
+            json={"url": "https://example.com/after-reject", "method": "GET"},
+            headers={"Authorization": auth},
+        )
+        self.assertEqual(single.status_code, 200)
+
+    def test_bulk_rejects_more_than_max_items(self):
+        resp = self.client.post(
+            "/v1/bulk-scrape",
+            json={
+                "items": [
+                    {"url": f"https://example.com/{idx}", "method": "GET"}
+                    for idx in range(51)
+                ]
+            },
+            headers={"Authorization": self.auth},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        body = resp.json()
+        self.assertEqual(body.get("error_code"), "BAD_REQUEST")
+
+    def test_bulk_preserves_per_item_validation_error_code(self):
+        resp = self.client.post(
+            "/v1/bulk-scrape",
+            json={"items": [{"url": "file:///etc/passwd", "method": "GET"}]},
+            headers={"Authorization": self.auth},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["summary"]["failed"], 1)
+        self.assertEqual(data["results"][0]["error"]["error_code"], "INVALID_URL_SCHEME")
