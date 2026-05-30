@@ -47,7 +47,6 @@ if load_config().get("billing", {}).get("enabled", False):
 async def startup():
     global _worker_pool, _health_checker, _db
     config = load_config()
-    billing_enabled = config.get("billing", {}).get("enabled", False)
 
     # === Phase 2: Connect to PostgreSQL and run migrations ===
     db_cfg = config.get("database", {})
@@ -82,6 +81,14 @@ async def startup():
     if not primary_breaker:
         primary_breaker = CircuitBreaker(registry.get("null"))
 
+    fallback_breaker = None
+    if fallback_name and fallback_name != primary_name:
+        fallback_breaker = breakers.get(fallback_name)
+        if fallback_breaker is None and fallback_name in registry.list_providers():
+            # If fallback is configured but not yet in breakers (edge case)
+            fb_provider = registry.get(fallback_name)
+            fallback_breaker = CircuitBreaker(fb_provider, failure_threshold=3, recovery_timeout=60)
+
     health_checker = ProviderHealthChecker(breakers, check_interval=30)
     await health_checker.start()
     _health_checker = health_checker
@@ -97,6 +104,7 @@ async def startup():
         provider=primary_breaker,
         fingerprint_generator=fp_gen,
         default_region=default_region,
+        fallback_provider=fallback_breaker,
     )
     await pool.start_all()
     _worker_pool = pool
@@ -123,10 +131,9 @@ async def startup():
             pass
         set_key_store(key_store)
 
-        if billing_enabled:
-            # Phase 3: wire webhook store only when the webhook route is mounted.
-            from asb_api.api.routes.webhooks import set_store as set_webhook_store
-            set_webhook_store(key_store)
+        # Phase 3: wire webhook store (uses same PostgresKeyStore)
+        from asb_api.api.routes.webhooks import set_store as set_webhook_store
+        set_webhook_store(key_store)
 
         limits_cfg = config.get("rate_limits", {})
         ut = PostgresUsageTracker()
@@ -171,7 +178,8 @@ async def startup():
 
     set_health_context(pool, breakers, registry)
 
-    logger.info(f"ASB Cloud API started with primary={primary_name}, regions={list(workers_per_region.keys())}")
+    fb_name = fallback_name if fallback_breaker else None
+    logger.info(f"ASB Cloud API started with primary={primary_name}, fallback={fb_name}, regions={list(workers_per_region.keys())}")
 
 
 @app.on_event("shutdown")

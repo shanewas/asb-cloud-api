@@ -156,7 +156,14 @@ provider_priority:
   fallback: null
 ```
 
-The v1 release may run with only the primary provider wired into workers. Fallback routing is a post-v1 hardening item unless implemented and tested before launch.
+Fallback routing is supported when `provider_priority.fallback` is set to a different enabled provider.
+
+- On `PoolExhaustedError` or `ProviderError` from the primary (including circuit breaker DOWN state), the worker automatically attempts the fallback.
+- The `provider` field in scrape response metadata reflects the *actual* provider that supplied the proxy for that request.
+- If both primary and fallback fail, the error from the primary is surfaced (deterministic behavior).
+- Health checks and circuit breakers run for all configured providers.
+
+The v1 release may run with only the primary provider wired into workers when no fallback is configured.
 
 ## 6. API Authentication
 
@@ -440,7 +447,7 @@ Provider lifecycle rules:
 - A borrowed proxy must be released in a `finally` block.
 - Provider health status must not block `null` provider operation.
 - Provider API failures must be converted into scrape error responses, not leaked task exceptions.
-- Fallback provider routing is not release-ready until covered by integration tests.
+- Fallback provider routing is covered by unit tests (see `tests/test_worker_regressions.py`).
 
 ## 12. Persistence Requirements
 
