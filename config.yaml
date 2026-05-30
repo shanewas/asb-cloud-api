@@ -5,7 +5,7 @@ app:
   debug: false
 
 security:
-  api_key_hash_algorithm: "argon2"
+  api_key_hash_algorithm: "sha256"
   cookie_encryption_key: "${COOKIE_ENCRYPTION_KEY}"
   log_url_domains_only: true
   redact_authorization_headers: true

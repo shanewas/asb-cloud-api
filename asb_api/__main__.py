@@ -13,17 +13,7 @@ from asb_api.api.usage import UsageTracker
 from asb_api.api.routes.scrape import router as scrape_router, set_pool, set_rate_limiter, set_usage_tracker, set_session_store_for_scrape
 from asb_api.api.routes.sessions import router as sessions_router, set_session_store
 from asb_api.api.routes.health import router as health_router, set_health_context
-
-# Phase 3: Billing routes
-from asb_api.api.routes import checkout, webhooks, billing as billing_routes, licenses
-
-# Phase 2: PostgreSQL persistence
-from asb_api.db import db, run_migrations
-from asb_api.db.auth_store import PostgresKeyStore
-from asb_api.db.rate_limiter import PostgresRateLimiter
-from asb_api.db.session_store import PostgresSessionStore
-from asb_api.db.usage import PostgresUsageTracker
-from asb_api.db.audit import AuditLogger
+from asb_api.api.routes.usage import router as usage_router, set_usage_context
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,22 +22,36 @@ app = FastAPI(title="ASB Cloud API")
 app.include_router(scrape_router)
 app.include_router(sessions_router)
 app.include_router(health_router)
+app.include_router(usage_router)
 
-# Phase 3: Billing
-app.include_router(checkout.router)
-app.include_router(webhooks.router)
-app.include_router(billing_routes.router)
+# Self-hosted license verification does not require Stripe.
+from asb_api.api.routes import licenses
 app.include_router(licenses.router)
+
+_worker_pool: RegionWorkerPool | None = None
+_health_checker: ProviderHealthChecker | None = None
+_db = None
+
+if load_config().get("billing", {}).get("enabled", False):
+    from asb_api.api.routes import checkout, webhooks, billing as billing_routes
+
+    app.include_router(checkout.router)
+    app.include_router(webhooks.router)
+    app.include_router(billing_routes.router)
 
 
 @app.on_event("startup")
 async def startup():
+    global _worker_pool, _health_checker, _db
     config = load_config()
 
     # === Phase 2: Connect to PostgreSQL and run migrations ===
     db_cfg = config.get("database", {})
     dsn = db_cfg.get("dsn") or os.environ.get("DATABASE_URL")
     if dsn:
+        from asb_api.db import db, run_migrations
+
+        _db = db
         # Reconfigure singleton pool sizes from config if provided
         db.dsn = dsn
         db.min_pool = db_cfg.get("min_pool", 5)
@@ -76,6 +80,7 @@ async def startup():
 
     health_checker = ProviderHealthChecker(breakers, check_interval=30)
     await health_checker.start()
+    _health_checker = health_checker
 
     fp_gen = FingerprintGenerator(config.get("fingerprint", {}).get("presets", {}))
 
@@ -90,6 +95,7 @@ async def startup():
         default_region=default_region,
     )
     await pool.start_all()
+    _worker_pool = pool
     set_pool(pool)
 
     security_cfg = config.get("security", {})
@@ -97,6 +103,12 @@ async def startup():
 
     # === Phase 2: Wire PostgreSQL-backed stores (replace in-memory) ===
     if dsn:
+        from asb_api.db.auth_store import PostgresKeyStore
+        from asb_api.db.rate_limiter import PostgresRateLimiter
+        from asb_api.db.session_store import PostgresSessionStore
+        from asb_api.db.usage import PostgresUsageTracker
+        from asb_api.db.audit import AuditLogger
+
         key_store = PostgresKeyStore()
         # Create a default test key on startup (idempotent if exists; for dev)
         try:
@@ -114,6 +126,7 @@ async def startup():
         limits_cfg = config.get("rate_limits", {})
         ut = PostgresUsageTracker()
         set_usage_tracker(ut)
+        set_usage_context(ut, limits_cfg)
 
         limiter = PostgresRateLimiter(limits_by_tier=limits_cfg, usage_tracker=ut)
         set_rate_limiter(limiter)
@@ -149,6 +162,7 @@ async def startup():
 
         ut = UsageTracker()
         set_usage_tracker(ut)
+        set_usage_context(ut, limits_cfg)
 
     set_health_context(pool, breakers, registry)
 
@@ -158,10 +172,21 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     logger.info("Shutting down ASB Cloud API...")
-    try:
-        await db.disconnect()
-    except Exception:
-        pass
+    if _health_checker:
+        try:
+            await _health_checker.stop()
+        except Exception:
+            logger.exception("Failed to stop provider health checker")
+    if _worker_pool:
+        try:
+            await _worker_pool.stop_all()
+        except Exception:
+            logger.exception("Failed to stop worker pool")
+    if _db:
+        try:
+            await _db.disconnect()
+        except Exception:
+            logger.exception("Failed to disconnect database")
 
 
 if __name__ == "__main__":

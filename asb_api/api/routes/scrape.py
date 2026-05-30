@@ -7,6 +7,7 @@ from asb_api.api.auth import get_api_key, get_key_store
 from asb_api.api.rate_limiter import SlidingWindowLimiter
 from asb_api.api.usage import UsageTracker
 from asb_api.session.store import SessionStore
+from asb_api.api.routes.sessions import ensure_session_owner
 
 router = APIRouter()
 pool: RegionWorkerPool | None = None
@@ -56,21 +57,26 @@ async def scrape(
     if not pool:
         raise HTTPException(status_code=503, detail="Service not initialized")
 
-    if request.session_id and session_store:
+    session = None
+    if request.session_id and not session_store:
+        raise HTTPException(status_code=503, detail="Session store not initialized")
+
+    if request.session_id:
         session = await session_store.get(request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        ensure_session_owner(session, key_id)
         if request.session_type == "stateful_reset":
             await session_store.update_cookies(request.session_id, {})
+            session.cookies = {}
 
     worker = await pool.acquire(request.region)
     try:
-        if request.session_id and session_store:
-            session = await session_store.get(request.session_id)
-            if session and session.cookies:
-                request.headers = request.headers or {}
-                cookie_header = "; ".join(f"{k}={v}" for k, v in session.cookies.items())
-                request.headers["Cookie"] = request.headers.get("Cookie", "") + ";" + cookie_header
+        if session and session.cookies:
+            request.headers = request.headers or {}
+            cookie_header = "; ".join(f"{k}={v}" for k, v in session.cookies.items())
+            existing = request.headers.get("Cookie")
+            request.headers["Cookie"] = f"{existing}; {cookie_header}" if existing else cookie_header
 
         result = await worker.scrape(request)
 

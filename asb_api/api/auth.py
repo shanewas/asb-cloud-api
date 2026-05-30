@@ -81,6 +81,7 @@ def set_key_store(store: Any):
 
 
 def get_key_store() -> Any:
+    global _key_store
     if _key_store is None:
         _key_store = InMemoryKeyStore()
     return _key_store

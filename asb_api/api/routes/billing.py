@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
+import os
 import stripe as stripe_lib
 
 from asb_api.api.auth import get_api_key, get_key_store
 
 
 router = APIRouter()
+stripe_lib.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
 @router.get("/v1/billing/portal")

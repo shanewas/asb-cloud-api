@@ -173,7 +173,7 @@ Supported key tiers:
 - `pro`
 - `enterprise`
 
-Release note: the config currently names Argon2 as the desired key hash algorithm. The implementation must either use Argon2 before production or the spec/config must explicitly state SHA-256 is a temporary development-only hash. Production should prefer Argon2id or another slow keyed hash appropriate for bearer-secret storage.
+API keys are generated as high-entropy bearer secrets and stored as SHA-256 hashes with timing-safe comparison. This is acceptable for randomly generated secrets; user-chosen or low-entropy keys are not supported without switching to a password hashing scheme.
 
 ## 7. API Reference
 
@@ -379,7 +379,7 @@ Billing endpoints are allowed in v1 only if Stripe environment variables are con
 - `GET /v1/billing/invoices`
 - `POST /v1/billing/verify-license`
 
-If billing is not launch-ready, these routes must return a clear disabled error or be excluded from deployment.
+If billing is not launch-ready, Stripe-backed routes must be excluded from deployment by keeping `billing.enabled=false`. License verification may remain mounted because it does not depend on Stripe.
 
 ## 8. Error Codes
 
@@ -539,12 +539,6 @@ ASB_SCREENSHOT_DIR=/tmp/screenshots
 
 These must be fixed before a public paid launch:
 
-- Register and test `GET /v1/usage`.
-- Enforce session ownership for get/delete/scrape session use.
-- Decide and implement production API key hashing. Prefer Argon2id.
-- Ensure shutdown stops browser workers and provider health-check tasks.
-- Add README and `.gitignore`.
-- Add Docker smoke test instructions.
 - Verify Stripe checkout and webhook behavior in test mode.
 - Decide screenshot delivery model: local self-hosted path vs cloud object storage URL.
 - Confirm legal terms for patent, self-hosted license, and customer data handling.

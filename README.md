@@ -18,11 +18,8 @@ The project is currently release-candidate quality, not production-ready. See [S
 
 This repository is suitable for local development and private beta hardening. Before public production use, close the release blockers listed in [SPEC.md](SPEC.md#17-known-release-blockers), especially:
 
-- `GET /v1/usage` route registration.
-- Session ownership checks on session read/delete/scrape use.
-- Production-grade API-key hashing.
-- Graceful shutdown of browser workers and provider health-check tasks.
 - Stripe test-mode verification.
+- A final legal/product review of the OSS license, patent positioning, and self-hosted/commercial terms.
 
 ## Quick Start
 
@@ -63,6 +60,14 @@ Copy `.env.example` to `.env` for local configuration:
 ```bash
 copy .env.example .env
 ```
+
+Smoke test the running container:
+
+```bash
+curl http://localhost:8000/v1/health
+```
+
+For authenticated endpoints, copy the default development key from container startup logs or create a persistent key with the admin CLI in PostgreSQL mode.
 
 ## API Examples
 
@@ -116,6 +121,12 @@ Common environment variables:
 
 See [.env.example](.env.example) for a full template.
 
+Stripe billing routes are mounted only when `billing.enabled` is `true` in `config.yaml`. License verification remains available separately and requires `LICENSE_SECRET_KEY`.
+
+## API Key Storage
+
+Generated API keys contain high-entropy random material and are stored as SHA-256 hashes with timing-safe comparison. This is appropriate for randomly generated bearer secrets; do not accept user-chosen low-entropy API keys without switching to a password hashing scheme.
+
 ## Development
 
 Run the lightweight checks:
@@ -163,4 +174,3 @@ Please report vulnerabilities using the process in [SECURITY.md](SECURITY.md). D
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
-

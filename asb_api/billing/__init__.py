@@ -1,8 +1,4 @@
-import stripe
 import os
-from typing import Literal
-
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 # Price IDs from Stripe dashboard (set via env for dev)
 FREE_PRICE_ID = os.environ.get("STRIPE_PRICE_STARTER", "")  # $49/mo

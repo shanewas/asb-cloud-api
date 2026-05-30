@@ -18,6 +18,11 @@ class CreateSessionRequest(BaseModel):
     fingerprint: Optional[str] = None
 
 
+def ensure_session_owner(session: Any, key_id: str):
+    if getattr(session, "key_id", None) != key_id:
+        raise HTTPException(404, "Session not found")
+
+
 @router.post("/v1/sessions")
 async def create_session(
     request: CreateSessionRequest,
@@ -44,6 +49,7 @@ async def get_session(session_id: str, key_id: str = Depends(get_api_key)):
     session = await session_store.get(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+    ensure_session_owner(session, key_id)
     return {
         "session_id": session.session_id,
         "region": session.region,
@@ -59,5 +65,9 @@ async def get_session(session_id: str, key_id: str = Depends(get_api_key)):
 async def delete_session(session_id: str, key_id: str = Depends(get_api_key)):
     if not session_store:
         raise HTTPException(503, "Session store not initialized")
+    session = await session_store.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    ensure_session_owner(session, key_id)
     await session_store.delete(session_id)
     return Response(status_code=204)

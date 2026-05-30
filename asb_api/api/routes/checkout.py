@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Literal
+import os
 import stripe as stripe_lib
 
 from asb_api.billing import (
@@ -13,6 +14,7 @@ from asb_api.api.auth import get_api_key
 
 
 router = APIRouter()
+stripe_lib.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
 class CheckoutRequest(BaseModel):
