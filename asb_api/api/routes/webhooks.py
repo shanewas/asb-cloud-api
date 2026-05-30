@@ -1,35 +1,59 @@
-from fastapi import APIRouter, Request, HTTPException
-import stripe
+import inspect
 import os
 import secrets
+from typing import Any
 
-from asb_api.billing import TIER_TO_PRICE
-from asb_api.db.auth_store import PostgresKeyStore
+from fastapi import APIRouter, Request, HTTPException
+
+from asb_api.billing.stripe_client import get_stripe
 
 router = APIRouter()
-webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-key_store: PostgresKeyStore | None = None
+key_store: Any = None
+_processed_events: set[str] = set()
 
 
-def set_store(store: PostgresKeyStore):
+def set_store(store: Any):
     global key_store
     key_store = store
+
+
+async def _record_event_once(event: dict[str, Any]) -> bool:
+    event_id = event.get("id")
+    if not event_id:
+        return True
+
+    recorder = getattr(key_store, "try_record_stripe_event", None) if key_store else None
+    if callable(recorder):
+        result = recorder(event_id, event.get("type", ""))
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+
+    if event_id in _processed_events:
+        return False
+    _processed_events.add(event_id)
+    return True
 
 
 @router.post("/v1/billing/webhook")
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
     if not webhook_secret:
         raise HTTPException(500, "STRIPE_WEBHOOK_SECRET not configured")
 
+    stripe = get_stripe()
     try:
         event = stripe.Webhook.construct_event(payload, sig, webhook_secret)
     except stripe.error.SignatureVerificationError:
         raise HTTPException(400, "Invalid signature")
     except Exception:
         raise HTTPException(400, "Invalid payload")
+
+    if not await _record_event_once(event):
+        return {"received": True, "duplicate": True}
 
     if key_store is None:
         # In test or misconfig, accept but do nothing
@@ -43,7 +67,12 @@ async def stripe_webhook(request: Request):
 
         if key_id and tier:
             # Subscription upgrade
-            await key_store.upgrade_tier(key_id, tier, session.get("subscription"))
+            await key_store.upgrade_tier(
+                key_id,
+                tier,
+                session.get("subscription"),
+                session.get("customer"),
+            )
         elif license_type:
             # Self-hosted license purchase
             raw_license = f"sk_license_{secrets.token_hex(24)}"

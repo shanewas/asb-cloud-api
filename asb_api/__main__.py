@@ -44,6 +44,7 @@ if load_config().get("billing", {}).get("enabled", False):
 async def startup():
     global _worker_pool, _health_checker, _db
     config = load_config()
+    billing_enabled = config.get("billing", {}).get("enabled", False)
 
     # === Phase 2: Connect to PostgreSQL and run migrations ===
     db_cfg = config.get("database", {})
@@ -119,9 +120,10 @@ async def startup():
             pass
         set_key_store(key_store)
 
-        # Phase 3: wire webhook store (uses same PostgresKeyStore)
-        from asb_api.api.routes.webhooks import set_store as set_webhook_store
-        set_webhook_store(key_store)
+        if billing_enabled:
+            # Phase 3: wire webhook store only when the webhook route is mounted.
+            from asb_api.api.routes.webhooks import set_store as set_webhook_store
+            set_webhook_store(key_store)
 
         limits_cfg = config.get("rate_limits", {})
         ut = PostgresUsageTracker()
