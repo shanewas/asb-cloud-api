@@ -13,6 +13,7 @@ from asb_api.api.usage import UsageTracker
 from asb_api.session.store import SessionStore
 from asb_api.api.routes.sessions import ensure_session_owner
 from asb_api.api.errors import APIError
+from asb_api.security import validate_scrape_url
 
 router = APIRouter()
 pool: RegionWorkerPool | None = None
@@ -47,6 +48,10 @@ async def _execute_one_scrape(
     skip_rate_limit_check: bool = False,
 ) -> ScrapeResponse:
     """Core execution path for one scrape request. Does NOT perform rate limiting when skip_rate_limit_check=True."""
+    # URL safety validation (from #8) — applies to both single scrape and every bulk item.
+    # Happens before rate limiting or worker acquisition.
+    validate_scrape_url(request.url)
+
     if not skip_rate_limit_check and rate_limiter:
         key_store = get_key_store()
         api_key = key_store.get(key_id)
@@ -132,14 +137,17 @@ async def bulk_scrape(
     if not items:
         raise HTTPException(status_code=400, detail="items array must not be empty")
 
-    # Batch rate limit check (N = number of items)
+    # Batch rate limit check: consume exactly N = len(items) quota units up front.
+    # If any single check fails (429), the whole batch is rejected before any execution.
+    # This matches the documented contract (per-item accounting for bulk).
     if rate_limiter:
         key_store = get_key_store()
         api_key = key_store.get(key_id)
         if hasattr(api_key, "__await__"):
             api_key = await api_key
         tier = api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
-        await rate_limiter.check(key_id, tier)  # this will raise 429 if insufficient for whole batch
+        for _ in range(len(items)):
+            await rate_limiter.check(key_id, tier)
 
     # Execute items with bounded concurrency
     max_conc = max(1, min(payload.max_concurrency or 8, 32))

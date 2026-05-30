@@ -288,10 +288,33 @@ class BulkScrapeSmokeTests(unittest.TestCase):
         self.assertIsNotNone(r2["result"])
 
     def test_bulk_rate_limit_rejects_whole_batch(self):
-        # Note: this test uses high limit (100). Stronger 1-remaining rejection test is in the rate limit section below.
-        resp = self.client.post(
+        # Use a fresh client with tiny (1 request) limit to verify N=2 batch is rejected when only 1 remains.
+        ks = InMemoryKeyStore()
+        raw, _ = ks.create(tier="starter")
+        set_key_store(ks)
+
+        limits = {"starter": {"requests": 1, "window_seconds": 3600}}  # only 1 allowed
+        lim = SlidingWindowLimiter(limits_by_tier=limits)
+        set_rate_limiter(lim)
+
+        # exhaust the 1
+        lim2 = SlidingWindowLimiter(limits_by_tier=limits)
+        # but since per-key, just submit 2-item bulk; first check should pass, second fail -> whole rejected
+        # Actually the pre-N checks happen before any exec.
+        client = TestClient(app)
+        auth = f"Bearer {raw}"
+
+        resp = client.post(
             "/v1/bulk-scrape",
-            json={"items": [{"url": "https://example.com/a", "method": "GET"}]},
-            headers={"Authorization": self.auth},
+            json={
+                "items": [
+                    {"url": "https://example.com/1", "method": "GET"},
+                    {"url": "https://example.com/2", "method": "GET"},
+                ]
+            },
+            headers={"Authorization": auth},
         )
-        self.assertEqual(resp.status_code, 200)
+        # With only 1 quota, batch of 2 must be rejected with 429 before any item runs
+        self.assertEqual(resp.status_code, 429)
+        body = resp.json()
+        self.assertEqual(body.get("error_code"), "RATE_LIMIT_EXCEEDED")
