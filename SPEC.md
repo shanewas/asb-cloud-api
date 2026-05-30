@@ -520,20 +520,26 @@ ASB_SCREENSHOT_DIR=/tmp/screenshots
 
 - `python -m compileall -q asb_api tests`
 - `python -m unittest discover -s tests -v`
+- `python -m unittest tests.test_smoke -v` (release smoke tests – see below)
 - Clawpatch report has no high or medium open findings for release-owned files.
 
 ### Manual Smoke Tests
 
+The following items from the original list are now covered by automated tests in `tests/test_smoke.py` (run with `python -m unittest tests.test_smoke -v`):
+
 1. Start API in in-memory mode.
-2. Capture the default startup API key from logs.
 3. Call `GET /v1/health`.
-4. Call `POST /v1/scrape` with GET against `https://example.com`.
-5. Call `POST /v1/scrape` with POST against a local echo endpoint and verify method/body.
-6. Create a session, scrape with it, verify cookies and request count update.
-7. Request a screenshot and verify the returned path exists.
-8. Start with PostgreSQL and run migrations.
-9. Create, verify, list, and revoke API keys with admin CLI.
-10. Verify usage rows are written after scrape attempts.
+4. Call `POST /v1/scrape` with GET (against a mocked local response).
+5. Call `POST /v1/scrape` with POST data (simulated local echo) and verify method/body handling.
+6. Create a session, use it in a scrape, verify cookies and request count update + ownership isolation.
+7. Request a screenshot and verify the returned path exists and is readable.
+10. Verify usage counters are incremented and exposed via `GET /v1/usage` (in-memory path).
+
+Remaining items that still require manual steps or extra infrastructure:
+8. Start with PostgreSQL and run migrations (use `docker compose` or a local Postgres).
+9. Create, verify, list, and revoke API keys with the admin CLI (see `asb_api/admin.py`).
+
+The automated smoke suite deliberately avoids real browsers, real proxy providers, external websites, Stripe, and PostgreSQL so it remains fast and deterministic in CI.
 
 ## 17. Known Release Blockers
 
