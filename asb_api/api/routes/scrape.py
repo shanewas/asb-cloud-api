@@ -8,6 +8,7 @@ from asb_api.api.rate_limiter import SlidingWindowLimiter
 from asb_api.api.usage import UsageTracker
 from asb_api.session.store import SessionStore
 from asb_api.api.routes.sessions import ensure_session_owner
+from asb_api.api.errors import APIError
 
 router = APIRouter()
 pool: RegionWorkerPool | None = None
@@ -25,11 +26,9 @@ def set_rate_limiter(rl: Any):
     global rate_limiter
     rate_limiter = rl
 
-
 def set_usage_tracker(ut: Any):
     global usage_tracker
     usage_tracker = ut
-
 
 def set_session_store_for_scrape(ss: Any):
     global session_store
@@ -55,16 +54,16 @@ async def scrape(
         await rate_limiter.check(key_id, tier)
 
     if not pool:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Worker pool or backing service is unavailable")
 
     session = None
     if request.session_id and not session_store:
-        raise HTTPException(status_code=503, detail="Session store not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Session store not initialized")
 
     if request.session_id:
         session = await session_store.get(request.session_id)
         if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise APIError(404, "SESSION_NOT_FOUND", "Session does not exist, expired, or is not owned by the key")
         ensure_session_owner(session, key_id)
         if request.session_type == "stateful_reset":
             await session_store.update_cookies(request.session_id, {})

@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from asb_api.api.auth import get_api_key, get_key_store
+from asb_api.api.errors import APIError
 
 
 router = APIRouter()
@@ -29,6 +30,6 @@ async def _get_tier(key_id: str) -> str:
 @router.get("/v1/usage")
 async def get_usage(key_id: str = Depends(get_api_key)):
     if usage_tracker is None:
-        raise HTTPException(503, "Usage tracker not initialized")
+        raise APIError(503, "SERVICE_NOT_INITIALIZED", "Usage tracker not initialized")
     tier = await _get_tier(key_id)
     return await usage_tracker.get_usage_info(key_id, tier, limits_cfg)
