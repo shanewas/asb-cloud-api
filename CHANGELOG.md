@@ -14,9 +14,11 @@ The format follows the spirit of Keep a Changelog, and this project uses semanti
 - `GET /v1/usage` route with in-memory and PostgreSQL usage tracker support.
 - Stripe billing test-mode runbook.
 - Redis rate limiting evaluation document (`docs/REDIS_RATE_LIMITING.md`) with scale thresholds, algorithm comparison, data model, and migration plan. Closes #12.
+- Configurable screenshot backend (`screenshots.enabled` + `screenshots.dir`) with v1 local-FS delivery model (local paths for self-hosted; disableable for cloud/SaaS). Closes #2.
 
 ### Fixed
 
+- Screenshot delivery model decided and implemented for v1 (local paths for self-hosted; explicitly disableable for cloud/SaaS to avoid leaking FS paths). Closes #2.
 - POST scrape requests now send request bodies instead of falling through to GET navigation.
 - Region worker pools now release the actual acquired semaphore.
 - Proxy leases are released when setup fails before browser execution.
