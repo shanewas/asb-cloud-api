@@ -38,7 +38,7 @@ class ASBRunner:
             request_headers["Content-Type"] = "application/json"
         return request_headers, json.dumps(data)
 
-    async def run(self, url, method, headers, data, proxy, fingerprint, timeout, screenshot):
+    async def run(self, url, method, headers, data, proxy, fingerprint, timeout, screenshot, screenshot_dir: str | None = None):
         proxy_config = None
         if proxy and proxy.host != "DIRECT":
             proxy_config = {
@@ -75,8 +75,7 @@ class ASBRunner:
             headers_out = dict(response.headers) if response else {}
 
             screenshot_url = None
-            if screenshot:
-                screenshot_dir = os.environ.get("ASB_SCREENSHOT_DIR", "/tmp/screenshots")
+            if screenshot and screenshot_dir:
                 os.makedirs(screenshot_dir, exist_ok=True)
                 screenshot_url = os.path.join(screenshot_dir, f"{uuid.uuid4().hex}.png")
                 await page.screenshot(path=screenshot_url)
