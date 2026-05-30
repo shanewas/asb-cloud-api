@@ -29,6 +29,9 @@ ENV/
 build/
 dist/
 *.egg-info/
+node_modules/
+*.tsbuildinfo
+
 
 # Runtime artifacts
 screenshots/
