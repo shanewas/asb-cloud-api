@@ -1,6 +1,9 @@
 """Tests for URL safety controls and log redaction (issue #8)."""
 
+import socket
 import unittest
+from unittest.mock import patch
+
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -83,6 +86,23 @@ class URLSafetyValidationTests(unittest.TestCase):
         self.assertTrue(_is_private_or_localhost("192.168.0.1"))
         self.assertFalse(_is_private_or_localhost("93.184.216.34"))  # example.com
         self.assertFalse(_is_private_or_localhost("example.com"))
+
+    def test_rejects_hostname_that_resolves_to_private_address(self):
+        set_security_config(SecurityConfig(block_private_networks=True))
+        resolved_loopback = [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))
+        ]
+
+        with patch("asb_api.security.socket.getaddrinfo", return_value=resolved_loopback):
+            with self.assertRaises(HTTPException) as ctx:
+                validate_scrape_url("https://attacker.example/private")
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail.get("error_code"), "PRIVATE_NETWORK_BLOCKED")
+
+    def test_unresolvable_hostname_is_not_treated_as_private(self):
+        with patch("asb_api.security.socket.getaddrinfo", side_effect=socket.gaierror):
+            self.assertFalse(_is_private_or_localhost("example.invalid"))
 
 
 class RedactionTests(unittest.TestCase):
