@@ -45,7 +45,7 @@ This release must not depend on dashboard, SDK, Redis, multi-region orchestratio
 - Auto-scaling and multi-VPS worker scheduling.
 - Public CDN-backed screenshot hosting.
 - Full anti-bot retry orchestration beyond a single worker attempt.
-- Public patent or legal grant language. Legal text must be handled outside this technical spec.
+- Public patent or legal grant language. The Apache-2.0 license provides the patent grant (see §3 of the [LICENSE](LICENSE) and [§17](#17-legal--licensing)). No additional patent document is required.
 
 ## 3. Release Readiness Definition
 
@@ -549,15 +549,53 @@ Remaining items that still require manual steps or extra infrastructure:
 
 The automated smoke suite deliberately avoids real browsers, real proxy providers, external websites, Stripe, and PostgreSQL so it remains fast and deterministic in CI.
 
-## 17. Known Release Blockers
+## 17. Legal & Licensing
+
+### License
+
+This repository is licensed under the [Apache License 2.0](LICENSE). The Apache-2.0 license is the intended and confirmed open-source license for the public repository. It grants:
+
+- **Copyright license** (§ 2): perpetual, worldwide, royalty-free right to use, reproduce, prepare derivative works, publicly display, publicly perform, sublicense, and distribute.
+- **Patent license** (§ 3): perpetual, worldwide, royalty-free license covering patents necessarily infringed by Contributions (subject to defensive termination upon patent litigation).
+
+No separate patent grant document is required beyond what Apache-2.0 § 3 already provides. Any patent claims that could be read against the ASB implementation are covered by the Apache-2.0 patent grant for Contributions made to this repository.
+
+### Runtime Billing & Licensing Features
+
+The codebase includes optional runtime features gated behind configuration flags:
+
+- **Stripe billing** (`billing.enabled` in `config.yaml`): checkout, webhook, customer portal, and invoice endpoints. These are only mounted when Stripe environment variables are configured and `billing.enabled=true`.
+- **Self-hosted license verification** (`POST /v1/billing/verify-license`): verifies signed license keys in self-hosted deployments. This endpoint requires `LICENSE_SECRET_KEY` and does not depend on Stripe.
+
+These runtime features:
+
+- Are part of the Apache-2.0 licensed codebase. Any operator may deploy, modify, or disable them in accordance with the license terms.
+- Do not impose additional license terms on the open-source code. Operators who use the billing or license features enter into a commercial relationship with their own Stripe account, not with an additional proprietary license from this project.
+- Are purely optional. The API is fully functional without billing or license verification enabled.
+
+### Self-Hosted vs. Commercial Terms
+
+Self-hosted deployments using `self_hosted.enabled=true` and an optional license key do not conflict with the Apache-2.0 terms:
+
+- The license verification endpoint is available in the OSS release. Operators may use it to gate their own commercial deployments.
+- The Apache-2.0 license permits charging fees for copies of the Work or Derivative Works (§ 4, final paragraph). Operators providing a hosted or self-hosted service based on this code do not violate the license.
+- No separate "commercial terms" document is required outside this repository for the OSS distribution. Operators who wish to offer commercial licenses (e.g., providing additional warranties, indemnification, or closed-source extensions) may do so independently and are responsible for their own terms.
+
+### Decision Log
+
+| Date       | Decision | Owner |
+| ---------- | -------- | ----- |
+| 2026-05-30 | Apache-2.0 confirmed as the sole OSS license. No additional patent or commercial terms document is required inside this repository. | Maintainer |
+| 2026-05-30 | Runtime billing and license-verification features are OSS-licensed configuration options; they do not alter or conflict with the Apache-2.0 terms. | Maintainer |
+| 2026-05-30 | Operators who offer paid hosting, support, or closed-source extensions based on this code may do so under their own commercial terms without a separate grant from this project. | Maintainer |
+
+## 18. Known Release Blockers
 
 These must be fixed before a public paid launch:
 
 - Verify Stripe checkout and webhook behavior in test mode.
-- Decide screenshot delivery model: local self-hosted path vs cloud object storage URL.
-- Confirm legal terms for patent, self-hosted license, and customer data handling.
 
-## 18. Release Decision
+## 19. Release Decision
 
 The API may be released privately to beta users when:
 
