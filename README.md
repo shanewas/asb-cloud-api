@@ -1,6 +1,6 @@
 # ASB Cloud API
 
-ASB Cloud API is a FastAPI service for browser-backed scraping. It runs Playwright workers behind a REST API and adds API-key authentication, rate limits, stateful sessions, proxy-provider abstraction, usage tracking, and optional Stripe/self-hosted licensing primitives.
+ASB Cloud API is a FastAPI service for browser-backed scraping. It runs Playwright workers behind a REST API and adds API-key authentication, rate limits, stateful sessions, proxy-provider abstraction, usage tracking, and optional Stripe/self-hosted licensing primitives. The source code is open-source under the [Apache License 2.0](LICENSE); runtime features such as Stripe billing and license verification are configuration-gated and do not impose additional license terms beyond Apache-2.0.
 
 The project is currently release-candidate quality, not production-ready. See [SPEC.md](SPEC.md) for the release contract and known blockers.
 
@@ -16,10 +16,10 @@ The project is currently release-candidate quality, not production-ready. See [S
 
 ## Project Status
 
-This repository is suitable for local development and private beta hardening. Before public production use, close the release blockers listed in [SPEC.md](SPEC.md#17-known-release-blockers), especially:
+This repository is suitable for local development and private beta hardening. Before public production use, close the release blockers listed in [SPEC.md](SPEC.md#18-known-release-blockers), especially:
 
 - Stripe test-mode verification.
-- A final legal/product review of the OSS license, patent positioning, and self-hosted/commercial terms.
+- The legal review confirming Apache-2.0 is the intended license and that runtime billing/licensing features are compatible. See [SPEC.md §17](SPEC.md#17-legal--licensing).
 
 ## Quick Start
 
