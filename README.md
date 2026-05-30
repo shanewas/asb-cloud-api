@@ -33,7 +33,7 @@ Install dependencies:
 
 ```bash
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 python -m playwright install chromium
 ```
@@ -114,7 +114,7 @@ Common environment variables:
 | --- | --- | --- |
 | `DATABASE_URL` | No | Enables PostgreSQL-backed persistence. |
 | `COOKIE_ENCRYPTION_KEY` | Recommended | Encrypts persisted session cookies. |
-| `ASB_SCREENSHOT_DIR` | No | Screenshot output directory. Defaults to `/tmp/screenshots`. |
+| `ASB_SCREENSHOT_DIR` | No | Screenshot output directory (used by `screenshots.dir`). Defaults to `/tmp/screenshots`. |
 | `STRIPE_SECRET_KEY` | Billing only | Stripe API key. |
 | `STRIPE_WEBHOOK_SECRET` | Billing only | Stripe webhook signature verification. |
 | `STRIPE_PRICE_STARTER` | Billing only | Stripe price ID for starter subscriptions. |
@@ -128,6 +128,18 @@ Common environment variables:
 See [.env.example](.env.example) for a full template.
 
 Stripe billing routes are mounted only when `billing.enabled` is `true` in `config.yaml`. License verification remains available separately and requires `LICENSE_SECRET_KEY`. See [docs/BILLING_TEST_MODE.md](docs/BILLING_TEST_MODE.md) before enabling Stripe-backed billing in a shared environment.
+
+## Screenshots
+
+v1 uses a local filesystem delivery model:
+
+- When `screenshot=true` on a scrape request and `screenshots.enabled: true` (default), the runner writes a PNG to the configured directory and returns its absolute server path in the `screenshot_url` response field.
+- Self-hosted operators are responsible for retrieving files (Docker volumes, bind mounts, or co-located processing are typical).
+- For pure cloud/SaaS deployments where API clients have no direct filesystem access to the server, set `screenshots.enabled: false` in `config.yaml`. Requests with `screenshot=true` will succeed but return `screenshot_url: null`.
+- Retention and cleanup are operator responsibilities (e.g., cron, logrotate, or tmpfs that clears on reboot). No automatic deletion in v1.
+- Internal filesystem paths are never leaked to remote clients when screenshots are disabled.
+
+See `config.yaml` and [SPEC.md](SPEC.md) for details and the v1 decision rationale.
 
 ## API Key Storage
 

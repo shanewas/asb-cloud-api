@@ -92,11 +92,23 @@ async def startup():
     workers_per_region = pool_cfg.get("workers_per_region", {"jp": 5})
     default_region = pool_cfg.get("default_region", "jp")
 
+    # Screenshot config (v1: local FS paths only; disable in pure cloud/SaaS deployments)
+    screenshots_cfg = config.get("screenshots", {}) or {}
+    screenshot_enabled = screenshots_cfg.get("enabled", True)
+    screenshot_dir = None
+    if screenshot_enabled:
+        screenshot_dir = (
+            screenshots_cfg.get("dir")
+            or os.environ.get("ASB_SCREENSHOT_DIR")
+            or "/tmp/screenshots"
+        )
+
     pool = RegionWorkerPool(
         workers_per_region=workers_per_region,
         provider=primary_breaker,
         fingerprint_generator=fp_gen,
         default_region=default_region,
+        screenshot_dir=screenshot_dir,
     )
     await pool.start_all()
     _worker_pool = pool
@@ -171,7 +183,7 @@ async def startup():
 
     set_health_context(pool, breakers, registry)
 
-    logger.info(f"ASB Cloud API started with primary={primary_name}, regions={list(workers_per_region.keys())}")
+    logger.info(f"ASB Cloud API started with primary={primary_name}, regions={list(workers_per_region.keys())}, screenshots={'enabled' if screenshot_dir else 'disabled'}")
 
 
 @app.on_event("shutdown")

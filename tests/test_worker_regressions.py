@@ -87,5 +87,66 @@ class RunnerRegressionTests(unittest.TestCase):
         self.assertEqual(json.loads(body), {"a": 1})
 
 
+class ScreenshotConfigRegressionTests(unittest.TestCase):
+    def test_worker_accepts_screenshot_dir(self):
+        try:
+            from asb_api.workers.worker import ASBWorker
+            from asb_api.providers.base import ProxyConfig
+        except ModuleNotFoundError as exc:
+            if exc.name == "playwright":
+                self.skipTest("playwright not installed")
+            raise
+
+        class DummyProvider:
+            name = "null"
+            async def get_proxy(self, region=None):
+                return ProxyConfig(host="DIRECT", port=0, region=region)
+            async def release_proxy(self, proxy):
+                pass
+            async def health_check(self):
+                return True
+
+        class DummyFPGen:
+            def get(self, name):
+                return type("FP", (), {"user_agent": "test", "viewport": (800, 600)})()
+
+        # Should construct without error; dir stored for later runner use
+        w = ASBWorker("w-1", DummyProvider(), DummyFPGen(), screenshot_dir="/tmp/test-shots")
+        self.assertEqual(w.screenshot_dir, "/tmp/test-shots")
+
+        w2 = ASBWorker("w-2", DummyProvider(), DummyFPGen())
+        self.assertIsNone(w2.screenshot_dir)
+
+    def test_region_pool_accepts_screenshot_dir(self):
+        try:
+            from asb_api.workers.pool import RegionWorkerPool
+        except ModuleNotFoundError as exc:
+            if exc.name == "playwright":
+                self.skipTest("playwright not installed")
+            raise
+
+        class DummyProvider:
+            name = "null"
+            async def get_proxy(self, region=None):
+                return None
+            async def release_proxy(self, proxy):
+                pass
+            async def health_check(self):
+                return True
+
+        class DummyFPGen:
+            def get(self, name):
+                return type("FP", (), {"user_agent": "test", "viewport": (800, 600)})()
+
+        pool = RegionWorkerPool(
+            {"jp": 1},
+            provider=DummyProvider(),
+            fingerprint_generator=DummyFPGen(),
+            default_region="jp",
+            screenshot_dir="/var/screenshots",
+        )
+        self.assertEqual(pool.workers["jp"][0].screenshot_dir, "/var/screenshots")
+
+
 if __name__ == "__main__":
     unittest.main()

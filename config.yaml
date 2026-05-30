@@ -113,3 +113,10 @@ database:
   dsn: "${DATABASE_URL}"
   min_pool: 5
   max_pool: 20
+
+# Screenshots (v1: local filesystem only)
+# - enabled: set false for pure cloud/SaaS deployments where clients have no FS access
+# - dir: output directory; use Docker volumes or bind mounts for retrieval in self-hosted
+screenshots:
+  enabled: true
+  dir: "${ASB_SCREENSHOT_DIR:/tmp/screenshots}"
