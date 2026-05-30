@@ -233,17 +233,26 @@ clawpatch report
 ## Repository Layout
 
 ```text
-asb_api/
-  api/          FastAPI auth, rate limiting, usage, and routes
-  billing/      Stripe/license helpers
-  db/           PostgreSQL stores and migrations
-  fingerprint/  Fingerprint preset loader
-  providers/    Proxy provider abstraction and implementations
-  session/      Session models and in-memory store
-  workers/      Region worker pools and Playwright runner
+asb_api/        Server implementation
+clients/
+  python/       asb-cloud-client (PyPI)
+  node/         asb-cloud-client (npm)
+  cli/          asb-cli (PyPI)
+examples/       Runnable smoke tests for all clients
 tests/          Regression tests
-SPEC.md         Release specification and readiness gates
+SPEC.md         Release specification
+clients/README.md  Client package names, versioning, and usage
 ```
+
+## Clients & SDKs
+
+Thin official clients are provided for fast integration (see [clients/README.md](clients/README.md)):
+
+- **Python**: `pip install asb-cloud-client` → `from asb_client import AsbClient`
+- **Node.js**: `npm install asb-cloud-client`
+- **CLI**: `pip install asb-cli` → `asb` command (scrape, sessions, usage, portal)
+
+All examples in `examples/` run against a local self-hosted instance (`python -m asb_api`).
 
 ## Responsible Use
 
