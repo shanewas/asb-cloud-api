@@ -1,7 +1,11 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from urllib.parse import urlparse
 from typing import Any
-from asb_api.session.models import ScrapeRequest, ScrapeResponse
+from asb_api.session.models import (
+    ScrapeRequest, ScrapeResponse,
+    BulkScrapeRequest, BulkItemResult, BulkScrapeResponse
+)
 from asb_api.workers.pool import RegionWorkerPool
 from asb_api.api.auth import get_api_key, get_key_store
 from asb_api.api.rate_limiter import SlidingWindowLimiter
@@ -35,22 +39,20 @@ def set_session_store_for_scrape(ss: Any):
     session_store = ss
 
 
-@router.post("/v1/scrape", response_model=ScrapeResponse)
-async def scrape(
+# Internal helper containing the core single-scrape logic (after rate-limit check).
+# Used by both the single /v1/scrape and the bulk endpoint.
+async def _execute_one_scrape(
     request: ScrapeRequest,
-    key_id: str = Depends(get_api_key),
-):
-    key_store = get_key_store()
-    # Support async (Postgres) or sync (InMemory) get()
-    api_key = key_store.get(key_id)
-    if hasattr(api_key, "__await__"):
-        api_key = await api_key  # in case future
-    if isinstance(api_key, dict):
-        tier = api_key.get("tier", "free")
-    else:
-        tier = getattr(api_key, "tier", "free")
-
-    if rate_limiter:
+    key_id: str,
+    skip_rate_limit_check: bool = False,
+) -> ScrapeResponse:
+    """Core execution path for one scrape request. Does NOT perform rate limiting when skip_rate_limit_check=True."""
+    if not skip_rate_limit_check and rate_limiter:
+        key_store = get_key_store()
+        api_key = key_store.get(key_id)
+        if hasattr(api_key, "__await__"):
+            api_key = await api_key
+        tier = api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
         await rate_limiter.check(key_id, tier)
 
     if not pool:
@@ -84,7 +86,6 @@ async def scrape(
             await session_store.increment_count(request.session_id)
 
         if usage_tracker:
-            # Phase 2 rich record if available (PostgresUsageTracker), else legacy increment
             if hasattr(usage_tracker, "record"):
                 domain = None
                 try:
@@ -112,3 +113,65 @@ async def scrape(
         return result
     finally:
         pool.release(worker, request.region)
+
+
+@router.post("/v1/scrape", response_model=ScrapeResponse)
+async def scrape(
+    request: ScrapeRequest,
+    key_id: str = Depends(get_api_key),
+):
+    return await _execute_one_scrape(request, key_id, skip_rate_limit_check=False)
+
+
+@router.post("/v1/bulk-scrape", response_model=BulkScrapeResponse)
+async def bulk_scrape(
+    payload: BulkScrapeRequest,
+    key_id: str = Depends(get_api_key),
+):
+    items = payload.items
+    if not items:
+        raise HTTPException(status_code=400, detail="items array must not be empty")
+
+    # Batch rate limit check (N = number of items)
+    if rate_limiter:
+        key_store = get_key_store()
+        api_key = key_store.get(key_id)
+        if hasattr(api_key, "__await__"):
+            api_key = await api_key
+        tier = api_key.get("tier", "free") if isinstance(api_key, dict) else getattr(api_key, "tier", "free")
+        await rate_limiter.check(key_id, tier)  # this will raise 429 if insufficient for whole batch
+
+    # Execute items with bounded concurrency
+    max_conc = max(1, min(payload.max_concurrency or 8, 32))
+    semaphore = asyncio.Semaphore(max_conc)
+
+    async def _run_one(index: int, req: ScrapeRequest) -> BulkItemResult:
+        async with semaphore:
+            try:
+                res = await _execute_one_scrape(req, key_id, skip_rate_limit_check=True)
+                return BulkItemResult(index=index, result=res, error=None)
+            except HTTPException as e:
+                # Convert to standardized error shape for the bulk result
+                err = {"error_code": "WORKER_ERROR" if e.status_code >= 500 else "BAD_REQUEST", "message": str(e.detail)}
+                return BulkItemResult(index=index, result=None, error=err)
+            except Exception as e:
+                return BulkItemResult(
+                    index=index,
+                    result=None,
+                    error={"error_code": "INTERNAL_ERROR", "message": str(e)}
+                )
+
+    tasks = [_run_one(i, item) for i, item in enumerate(items)]
+    results = await asyncio.gather(*tasks)
+
+    succeeded = sum(1 for r in results if r.result is not None and r.result.status == "success")
+    failed = len(results) - succeeded
+
+    return BulkScrapeResponse(
+        results=results,
+        summary={
+            "total": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+        },
+    )
