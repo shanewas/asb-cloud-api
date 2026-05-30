@@ -1,6 +1,7 @@
 import logging
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from asb_api.config import load_config
 from asb_api.providers import ProviderRegistry
 from asb_api.providers.health import CircuitBreaker, ProviderHealthChecker
@@ -21,6 +22,32 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ASB Cloud API")
 install_error_handlers(app)
+
+# CORS for explicit dashboard origins only (secure default: no middleware if unset).
+# Supports DASHBOARD_ORIGINS env (comma-separated) or dashboard.origins in config.yaml.
+# No wildcard ever. See docs/DASHBOARD_ARCHITECTURE.md §7.
+_config_for_cors = load_config()
+_dash_origins_raw = os.environ.get("DASHBOARD_ORIGINS", "").strip()
+if _dash_origins_raw:
+    _dash_origins = [o.strip() for o in _dash_origins_raw.split(",") if o.strip()]
+else:
+    _dash = _config_for_cors.get("dashboard", {}) or {}
+    _origins = _dash.get("origins", []) or []
+    if isinstance(_origins, str):
+        _dash_origins = [o.strip() for o in _origins.split(",") if o.strip()]
+    else:
+        _dash_origins = [str(o).strip() for o in _origins if str(o).strip()]
+if _dash_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_dash_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
+    logging.getLogger(__name__).info(f"CORS enabled for dashboard origins: {_dash_origins}")
+else:
+    logging.getLogger(__name__).info("CORS disabled (no dashboard.origins / DASHBOARD_ORIGINS; secure default)")
 
 app.include_router(scrape_router)
 app.include_router(sessions_router)
@@ -82,6 +109,14 @@ async def startup():
     if not primary_breaker:
         primary_breaker = CircuitBreaker(registry.get("null"))
 
+    fallback_breaker = None
+    if fallback_name and fallback_name != primary_name:
+        fallback_breaker = breakers.get(fallback_name)
+        if fallback_breaker is None and fallback_name in registry.list_providers():
+            # If fallback is configured but not yet in breakers (edge case)
+            fb_provider = registry.get(fallback_name)
+            fallback_breaker = CircuitBreaker(fb_provider, failure_threshold=3, recovery_timeout=60)
+
     health_checker = ProviderHealthChecker(breakers, check_interval=30)
     await health_checker.start()
     _health_checker = health_checker
@@ -109,6 +144,7 @@ async def startup():
         fingerprint_generator=fp_gen,
         default_region=default_region,
         screenshot_dir=screenshot_dir,
+        fallback_provider=fallback_breaker,
     )
     await pool.start_all()
     _worker_pool = pool
@@ -116,6 +152,10 @@ async def startup():
 
     security_cfg = config.get("security", {})
     encryption_key = security_cfg.get("cookie_encryption_key")
+
+    # Wire security config (URL safety + log redaction rules) for use by routes and utilities
+    from asb_api.security import set_security_config
+    set_security_config(config)
 
     # === Phase 2: Wire PostgreSQL-backed stores (replace in-memory) ===
     if dsn:
@@ -135,8 +175,9 @@ async def startup():
             pass
         set_key_store(key_store)
 
+        # Phase 3: wire webhook store ONLY when billing routes are mounted (see top-level guard).
+        # Prevents import of Stripe-backed webhook code in billing-disabled deployments.
         if billing_enabled:
-            # Phase 3: wire webhook store only when the webhook route is mounted.
             from asb_api.api.routes.webhooks import set_store as set_webhook_store
             set_webhook_store(key_store)
 
@@ -183,7 +224,12 @@ async def startup():
 
     set_health_context(pool, breakers, registry)
 
-    logger.info(f"ASB Cloud API started with primary={primary_name}, regions={list(workers_per_region.keys())}, screenshots={'enabled' if screenshot_dir else 'disabled'}")
+    fb_name = fallback_name if fallback_breaker else None
+    screenshot_mode = "enabled" if screenshot_dir else "disabled"
+    logger.info(
+        f"ASB Cloud API started with primary={primary_name}, fallback={fb_name}, "
+        f"regions={list(workers_per_region.keys())}, screenshots={screenshot_mode}"
+    )
 
 
 @app.on_event("shutdown")

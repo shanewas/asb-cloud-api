@@ -13,7 +13,7 @@ The first releasable version must prove one narrow promise:
 
 > An authenticated customer can call `POST /v1/scrape` and receive a reliable browser-rendered response with predictable rate limits, session behavior, provider routing, usage tracking, and deployable self-hosted packaging.
 
-This release must not depend on dashboard, SDK, Redis, multi-region orchestration, or automated signup. Those are post-release features.
+This release must not depend on dashboard, Redis, multi-region orchestration, or automated signup. SDKs/CLI were added post-v1 (see clients/ and GitHub issue #10).
 
 ## 2. Release Scope
 
@@ -36,16 +36,16 @@ This release must not depend on dashboard, SDK, Redis, multi-region orchestratio
 
 ### Out of Scope for v1
 
-- Customer dashboard.
+- Customer dashboard (see [docs/DASHBOARD_ARCHITECTURE.md](docs/DASHBOARD_ARCHITECTURE.md) for architecture proposal).
 - Self-service signup.
-- Python, Node, or CLI SDKs.
-- Bulk scrape endpoint.
+- ~~Python, Node, or CLI SDKs~~ (implemented post-v1; see clients/ and issue #10).
+- ~~Bulk scrape endpoint~~ (implemented post-v1; see design + API details in section 7 and issue #11).
 - Redis rate limiting (see [docs/REDIS_RATE_LIMITING.md](docs/REDIS_RATE_LIMITING.md) for evaluation and migration plan).
 - ClickHouse or analytics warehouse.
 - Auto-scaling and multi-VPS worker scheduling.
 - Public CDN-backed screenshot hosting.
 - Full anti-bot retry orchestration beyond a single worker attempt.
-- Public patent or legal grant language. Legal text must be handled outside this technical spec.
+- Public patent or legal grant language. The Apache-2.0 license provides the patent grant (see §3 of the [LICENSE](LICENSE) and [§17](#17-legal--licensing)). No additional patent document is required.
 
 ## 3. Release Readiness Definition
 
@@ -156,7 +156,14 @@ provider_priority:
   fallback: null
 ```
 
-The v1 release may run with only the primary provider wired into workers. Fallback routing is a post-v1 hardening item unless implemented and tested before launch.
+Fallback routing is supported when `provider_priority.fallback` is set to a different enabled provider.
+
+- On `PoolExhaustedError` or `ProviderError` from the primary (including circuit breaker DOWN state), the worker automatically attempts the fallback.
+- The `provider` field in scrape response metadata reflects the *actual* provider that supplied the proxy for that request.
+- If both primary and fallback fail, the error from the primary is surfaced (deterministic behavior).
+- Health checks and circuit breakers run for all configured providers.
+
+The v1 release may run with only the primary provider wired into workers when no fallback is configured.
 
 ## 6. API Authentication
 
@@ -291,6 +298,88 @@ Error response body for worker-level failures:
   "message": "human-readable error"
 }
 ```
+
+### `POST /v1/bulk-scrape` (Post-v1)
+
+**Status**: Implemented.
+
+**Rationale for chosen approach (answers the open questions in issue #11)**:
+- **Synchronous batch response** (not async job model) for the initial version. This keeps the feature simple, reuses all existing single-request infrastructure (auth, rate limiting, sessions, worker pool, usage tracking), and provides immediate results. An async `/v1/jobs` + webhook model can be added later if needed for very large batches.
+- **Per-item fields fully supported**: Every item in the batch is a full `ScrapeRequest` (url, method, headers, data, region, fingerprint, timeout, screenshot, session_id, session_type, proxy_provider). No global overrides required (though a future version could add them).
+- **Usage billing for partial failures**: Every item that passes the initial rate-limit check for the batch size is counted toward usage (via the normal `increment` / `record` path), even if that individual item later fails with a worker error. This matches the "you pay for what you attempt" model.
+- **Rate-limit behavior**: The bulk endpoint performs **one** rate limit check for `N = len(items)` requests upfront using the caller's tier limits. If the key does not have sufficient remaining quota for the entire batch, the whole request is rejected with `RATE_LIMIT_EXCEEDED` before any scraping work begins. This is predictable and avoids partial consumption. Per-item rate limiting inside the batch is not performed (the batch check is authoritative).
+- **Partial success/failure**: Always returns 200 with a results array. Every item has either a full successful `ScrapeResponse` or an error object with `error_code` + `message` (using the standardized error contract from issue #6). Never fails the HTTP request itself for per-item problems.
+- **Concurrency**: Items are executed with bounded internal concurrency (default 8, configurable via `max_concurrency` in the request, capped by server policy). All items still flow through the normal `RegionWorkerPool`, so global per-region worker limits are respected. This provides good throughput without overwhelming the system.
+- **Error handling & metadata**: Each result includes the normal `metadata` (with correct `provider`, `region`, `duration_ms`, etc. for that item). Request IDs are per-item.
+
+**Request**:
+
+```json
+{
+  "items": [
+    {
+      "url": "https://example.com",
+      "method": "GET",
+      "region": "jp",
+      "timeout": 30,
+      "screenshot": false
+    },
+    {
+      "url": "https://httpbin.org/post",
+      "method": "POST",
+      "data": {"key": "value"},
+      "session_id": "sess_xxx"
+    }
+  ],
+  "max_concurrency": 5
+}
+```
+
+**Response** (always HTTP 200 on acceptance; partial failures are inside the payload):
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "result": {
+        "request_id": "req_bulk_0001",
+        "status": "success",
+        "html": "<!doctype html>...",
+        "metadata": { "provider": "decodo", "region": "jp", ... },
+        "error_code": null,
+        "message": null
+      }
+    },
+    {
+      "index": 1,
+      "result": null,
+      "error": {
+        "error_code": "...",
+        "message": "..."
+      }
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "succeeded": 8,
+    "failed": 2
+  }
+}
+```
+
+**Error cases (top-level)**:
+- 400 `BAD_REQUEST` — invalid batch (empty items, too large, bad per-item shape)
+- 402 `OVERAGE_LIMIT_EXCEEDED`
+- 403 auth errors
+- 429 `RATE_LIMIT_EXCEEDED` (when the batch size exceeds remaining quota)
+- 503 `SERVICE_NOT_INITIALIZED`
+
+**Limits (enforced server-side, documented in README later)**:
+- Max batch size: 50
+- Max `max_concurrency`: 16
+
+This design reuses `ScrapeRequest` and `ScrapeResponse` directly for items/results, minimizing new surface area.
 
 ### `POST /v1/sessions`
 
@@ -440,7 +529,7 @@ Provider lifecycle rules:
 - A borrowed proxy must be released in a `finally` block.
 - Provider health status must not block `null` provider operation.
 - Provider API failures must be converted into scrape error responses, not leaked task exceptions.
-- Fallback provider routing is not release-ready until covered by integration tests.
+- Fallback provider routing is covered by unit tests (see `tests/test_worker_regressions.py`).
 
 ## 12. Persistence Requirements
 
@@ -548,7 +637,47 @@ The following items from the original list are now covered by automated tests in
 
 The automated smoke suite (`tests/test_smoke.py`) covers the fast deterministic subset and deliberately avoids real browsers, external sites, Stripe, and live Postgres. PostgreSQL + full key flows remain manual or compose-based.
 
-## 17. Screenshots (v1 Delivery Model)
+## 17. Legal & Licensing
+
+### License
+
+This repository is licensed under the [Apache License 2.0](LICENSE). The Apache-2.0 license is the intended and confirmed open-source license for the public repository. It grants:
+
+- **Copyright license** (§ 2): perpetual, worldwide, royalty-free right to use, reproduce, prepare derivative works, publicly display, publicly perform, sublicense, and distribute.
+- **Patent license** (§ 3): perpetual, worldwide, royalty-free license covering patents necessarily infringed by Contributions (subject to defensive termination upon patent litigation).
+
+No separate patent grant document is required beyond what Apache-2.0 § 3 already provides. Any patent claims that could be read against the ASB implementation are covered by the Apache-2.0 patent grant for Contributions made to this repository.
+
+### Runtime Billing & Licensing Features
+
+The codebase includes optional runtime features gated behind configuration flags:
+
+- **Stripe billing** (`billing.enabled` in `config.yaml`): checkout, webhook, customer portal, and invoice endpoints. These are only mounted when Stripe environment variables are configured and `billing.enabled=true`.
+- **Self-hosted license verification** (`POST /v1/billing/verify-license`): verifies signed license keys in self-hosted deployments. This endpoint requires `LICENSE_SECRET_KEY` and does not depend on Stripe.
+
+These runtime features:
+
+- Are part of the Apache-2.0 licensed codebase. Any operator may deploy, modify, or disable them in accordance with the license terms.
+- Do not impose additional license terms on the open-source code. Operators who use the billing or license features enter into a commercial relationship with their own Stripe account, not with an additional proprietary license from this project.
+- Are purely optional. The API is fully functional without billing or license verification enabled.
+
+### Self-Hosted vs. Commercial Terms
+
+Self-hosted deployments using `self_hosted.enabled=true` and an optional license key do not conflict with the Apache-2.0 terms:
+
+- The license verification endpoint is available in the OSS release. Operators may use it to gate their own commercial deployments.
+- The Apache-2.0 license permits charging fees for copies of the Work or Derivative Works (§ 4, final paragraph). Operators providing a hosted or self-hosted service based on this code do not violate the license.
+- No separate "commercial terms" document is required outside this repository for the OSS distribution. Operators who wish to offer commercial licenses (e.g., providing additional warranties, indemnification, or closed-source extensions) may do so independently and are responsible for their own terms.
+
+### Decision Log
+
+| Date       | Decision | Owner |
+| ---------- | -------- | ----- |
+| 2026-05-30 | Apache-2.0 confirmed as the sole OSS license. No additional patent or commercial terms document is required inside this repository. | Maintainer |
+| 2026-05-30 | Runtime billing and license-verification features are OSS-licensed configuration options; they do not alter or conflict with the Apache-2.0 terms. | Maintainer |
+| 2026-05-30 | Operators who offer paid hosting, support, or closed-source extensions based on this code may do so under their own commercial terms without a separate grant from this project. | Maintainer |
+
+## 18. Screenshots (v1 Delivery Model)
 
 **Decision:** v1 supports the local self-hosted filesystem path model only.
 
@@ -556,7 +685,7 @@ The automated smoke suite (`tests/test_smoke.py`) covers the fast deterministic 
 - Self-hosted users configure `screenshots.dir` (or `ASB_SCREENSHOT_DIR`) and retrieve files using bind mounts, shared volumes, sidecar containers, or host-local post-processing.
 - `screenshot=true` is honored when `screenshots.enabled: true` (the default). The directory is created on first capture.
 - For cloud/SaaS deployments (where remote clients have no filesystem access to the server), set `screenshots.enabled: false`. Scrape requests with `screenshot=true` succeed with `screenshot_url: null`; no internal paths are ever returned to clients.
-- Retention policy, cleanup, and storage quotas are the operator's responsibility. No auto-deletion or background purge job exists in v1. Recommended: use a tmpfs/ramdisk for the dir, or run a periodic cleanup (e.g., find -mtime +1 -delete).
+- Retention policy, cleanup, and storage quotas are the operator's responsibility. No auto-deletion or background purge job exists in v1. Recommended: use a tmpfs/ramdisk for the dir, or run a periodic cleanup (for example, `find -mtime +1 -delete`).
 - Future (post-v1) object storage / signed URL backends remain out of scope per the original release contract.
 
 This choice:
@@ -567,14 +696,13 @@ This choice:
 
 See README.md "Screenshots" section and `config.yaml` for the concrete configuration keys.
 
-## 18. Known Release Blockers
+## 19. Known Release Blockers
 
 These must be fixed before a public paid launch:
 
 - Verify Stripe checkout and webhook behavior in test mode.
-- Confirm legal terms for patent, self-hosted license, and customer data handling.
 
-## 19. Release Decision
+## 20. Release Decision
 
 The API may be released privately to beta users when:
 

@@ -10,12 +10,14 @@ class RateLimiter(Protocol):
 
     All implementations must provide:
       - check(key_id, tier) -> (allowed: bool, remaining: int, reset_at: int)
+      - check_many(key_id, tier, count) -> atomic multi-request check where available
       - Raise RateLimitExceeded on denial (HTTP 429 with headers).
       - Optionally raise OverageLimitExceeded for monthly overage (HTTP 402).
     """
     limits_by_tier: dict
 
     async def check(self, key_id: str, tier: str = "free") -> tuple[bool, int, int]: ...
+    async def check_many(self, key_id: str, tier: str = "free", count: int = 1) -> tuple[bool, int, int]: ...
 
 
 class RateLimitExceeded(HTTPException):
@@ -62,9 +64,13 @@ class SlidingWindowLimiter:
         return max_requests, window_seconds
 
     async def check(self, key_id: str, tier: str = "free") -> tuple[bool, int, int]:
+        return await self.check_many(key_id, tier=tier, count=1)
+
+    async def check_many(self, key_id: str, tier: str = "free", count: int = 1) -> tuple[bool, int, int]:
         max_requests, window_seconds = self._get_limits(tier)
         if max_requests == -1:
             return True, -1, 0
+        count = max(1, count)
         now = time.time()
         async with self._lock:
             if key_id not in self._windows:
@@ -73,14 +79,17 @@ class SlidingWindowLimiter:
             cutoff = now - window_seconds
             while window and window[0] < cutoff:
                 window.popleft()
-            if len(window) >= max_requests:
-                reset_at = int(window[0] + window_seconds)
+            remaining_before = max_requests - len(window)
+            if remaining_before < count:
+                reset_base = window[0] if window else now
+                reset_at = int(reset_base + window_seconds)
                 raise RateLimitExceeded(
                     limit=max_requests,
-                    remaining=0,
+                    remaining=max(0, remaining_before),
                     reset_at=reset_at,
                 )
-            window.append(now)
+            for _ in range(count):
+                window.append(now)
             remaining = max_requests - len(window)
             reset_at = int(now + window_seconds)
             return True, remaining, reset_at

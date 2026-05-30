@@ -29,7 +29,7 @@ def _normalize_none_keys(d):
         return {"null" if k is None else k: _normalize_none_keys(v) for k, v in d.items()}
     if isinstance(d, list):
         return [_normalize_none_keys(v) for v in d]
-    return d if d is not None else "null"
+    return d
 
 
 def load_config(path: str | None = None) -> dict:

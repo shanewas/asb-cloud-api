@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import time
-from asb_api.providers.base import ProxyProviderInterface
+from asb_api.providers.base import ProxyProviderInterface, PoolExhaustedError, ProviderError
 from asb_api.fingerprint.generator import FingerprintGenerator
 from asb_api.session.models import ScrapeRequest, ScrapeResponse, ScrapeMetadata
 from .asb_runner import ASBRunner
@@ -14,9 +14,11 @@ class ASBWorker:
         provider: ProxyProviderInterface,
         fingerprint_generator: FingerprintGenerator,
         screenshot_dir: str | None = None,
+        fallback_provider: ProxyProviderInterface | None = None,
     ):
         self.worker_id = worker_id
         self.provider = provider
+        self.fallback_provider = fallback_provider
         self.fingerprint_generator = fingerprint_generator
         self.screenshot_dir = screenshot_dir
         self.runner: ASBRunner | None = None
@@ -35,10 +37,33 @@ class ASBWorker:
         start = time.monotonic()
         proxy = None
         fp = None
+        used_provider_name = self.provider.name
 
         try:
+            # Proxy acquisition with fallback support
             if self.provider.name != "null":
-                proxy = await self.provider.get_proxy(request.region)
+                proxy_breaker = self.provider
+                try:
+                    proxy = await proxy_breaker.get_proxy(request.region)
+                except (PoolExhaustedError, ProviderError) as primary_err:
+                    if self.fallback_provider and self.fallback_provider is not self.provider:
+                        try:
+                            proxy_breaker = self.fallback_provider
+                            proxy = await proxy_breaker.get_proxy(request.region)
+                            used_provider_name = self.fallback_provider.name
+                        except (PoolExhaustedError, ProviderError, Exception):
+                            # Both primary and fallback failed; re-raise the primary error
+                            # so the caller sees a clear failure from the configured primary.
+                            raise primary_err
+                    else:
+                        raise
+                else:
+                    # Success on primary
+                    pass
+                # Remember which breaker we got the proxy from for release
+                self._last_proxy_breaker = proxy_breaker  # type: ignore[attr-defined]
+            else:
+                self._last_proxy_breaker = None  # type: ignore[attr-defined]
 
             fp = self.fingerprint_generator.get(
                 request.fingerprint or "general"
@@ -65,7 +90,7 @@ class ASBWorker:
                 headers=result.get("headers", {}),
                 metadata=ScrapeMetadata(
                     request_id=request_id,
-                    provider=self.provider.name,
+                    provider=used_provider_name,
                     region=request.region,
                     fingerprint_id=fp.user_agent[:50],
                     worker_id=self.worker_id,
@@ -83,7 +108,7 @@ class ASBWorker:
                 message=str(e),
                 metadata=ScrapeMetadata(
                     request_id=request_id,
-                    provider=self.provider.name,
+                    provider=used_provider_name,
                     region=request.region,
                     fingerprint_id=getattr(fp, "user_agent", "")[:50] if fp else "",
                     worker_id=self.worker_id,
@@ -93,5 +118,8 @@ class ASBWorker:
                 ),
             )
         finally:
-            if proxy:
-                await self.provider.release_proxy(proxy)
+            # Release to the correct breaker (primary or fallback) that supplied the proxy
+            last_breaker = getattr(self, "_last_proxy_breaker", None)
+            if proxy and last_breaker:
+                await last_breaker.release_proxy(proxy)
+            self._last_proxy_breaker = None  # type: ignore[attr-defined]
