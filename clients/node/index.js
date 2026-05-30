@@ -3,7 +3,7 @@
  * Requires Node >= 18 (global fetch).
  */
 
-export class AsbError extends Error {
+class AsbError extends Error {
   constructor(message, statusCode = null, errorCode = null, response = null) {
     super(message);
     this.name = 'AsbError';
@@ -13,14 +13,14 @@ export class AsbError extends Error {
   }
 }
 
-export class AsbAuthError extends AsbError {
+class AsbAuthError extends AsbError {
   constructor(message, statusCode = 403, opts = {}) {
     super(message, statusCode, opts.errorCode || 'INVALID_API_KEY', opts.response);
     this.name = 'AsbAuthError';
   }
 }
 
-export class AsbRateLimitError extends AsbError {
+class AsbRateLimitError extends AsbError {
   constructor(message, statusCode = 429, opts = {}) {
     super(message, statusCode, 'RATE_LIMIT_EXCEEDED', opts.response);
     this.name = 'AsbRateLimitError';
@@ -30,7 +30,7 @@ export class AsbRateLimitError extends AsbError {
   }
 }
 
-export class AsbOverageError extends AsbError {
+class AsbOverageError extends AsbError {
   constructor(message, statusCode = 402, opts = {}) {
     super(message, statusCode, 'OVERAGE_LIMIT_EXCEEDED', opts.response);
     this.name = 'AsbOverageError';
@@ -38,14 +38,14 @@ export class AsbOverageError extends AsbError {
   }
 }
 
-export class AsbNotFoundError extends AsbError {
+class AsbNotFoundError extends AsbError {
   constructor(message, statusCode = 404, opts = {}) {
     super(message, statusCode, opts.errorCode, opts.response);
     this.name = 'AsbNotFoundError';
   }
 }
 
-export class AsbClient {
+class AsbClient {
   /**
    * @param {Object} opts
    * @param {string} [opts.baseUrl='http://localhost:8000']

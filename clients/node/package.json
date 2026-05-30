@@ -10,7 +10,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/*.js || echo 'no tests yet'"
+    "test": "node --test test/*.js",
+    "smoke": "node test/smoke.js"
   },
   "keywords": [
     "asb",
