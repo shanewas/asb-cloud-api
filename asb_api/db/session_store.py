@@ -1,6 +1,7 @@
 import uuid
 import time
 import json
+from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet
 from .connection import db
 from ..session.store import SessionInfo  # reuse the dataclass for return compatibility
@@ -20,14 +21,15 @@ class PostgresSessionStore:
 
     async def create(self, key_id: str, region: str, fingerprint: str | None = None) -> SessionInfo:
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
-        now = time.time()
-        expires_at = now + self.ttl_seconds
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.timestamp()
+        expires_at_dt = now_dt + timedelta(seconds=self.ttl_seconds)
         conn = await db.pool.acquire()
         try:
             await conn.execute(
                 """INSERT INTO sessions (session_id, key_id, region, fingerprint, expires_at)
                    VALUES ($1, $2, $3, $4, $5)""",
-                session_id, key_id, region, fingerprint, expires_at
+                session_id, key_id, region, fingerprint, expires_at_dt
             )
         finally:
             await db.pool.release(conn)
@@ -40,17 +42,18 @@ class PostgresSessionStore:
             created_at=now,
             last_used=now,
             request_count=0,
-            expires_at=expires_at,
+            expires_at=expires_at_dt.timestamp(),
         )
 
     async def get(self, session_id: str) -> SessionInfo | None:
-        now = time.time()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.timestamp()
         conn = await db.pool.acquire()
         try:
             row = await conn.fetchrow(
                 """SELECT * FROM sessions WHERE session_id = $1 AND deleted_at IS NULL
                    AND expires_at > $2""",
-                session_id, now
+                session_id, now_dt
             )
             if not row:
                 return None

@@ -45,7 +45,10 @@ async def scrape(
     api_key = key_store.get(key_id)
     if hasattr(api_key, "__await__"):
         api_key = await api_key  # in case future
-    tier = api_key.tier if api_key else (api_key.get("tier") if isinstance(api_key, dict) else "free")
+    if isinstance(api_key, dict):
+        tier = api_key.get("tier", "free")
+    else:
+        tier = getattr(api_key, "tier", "free")
 
     if rate_limiter:
         await rate_limiter.check(key_id, tier)

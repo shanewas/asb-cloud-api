@@ -62,11 +62,11 @@ class PostgresKeyStore:
                 "email": row["owner_email"],  # alias for old code
                 "created_at": row["created_at"].timestamp() if row["created_at"] else time.time(),
                 "revoked": row["revoked"],
-                "stripe_customer_id": row.get("stripe_customer_id"),
-                "stripe_subscription_id": row.get("stripe_subscription_id"),
-                "subscription_status": row.get("subscription_status"),
-                "license_type": row.get("license_type"),
-                "license_key": row.get("license_key"),
+                "stripe_customer_id": row["stripe_customer_id"],
+                "stripe_subscription_id": row["stripe_subscription_id"],
+                "subscription_status": row["subscription_status"],
+                "license_type": row["license_type"],
+                "license_key": row["license_key"],
             }
         finally:
             await db.pool.release(conn)
@@ -92,9 +92,9 @@ class PostgresKeyStore:
                     "email": r["owner_email"],
                     "revoked": r["revoked"],
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                    "stripe_customer_id": r.get("stripe_customer_id"),
-                    "subscription_status": r.get("subscription_status"),
-                    "license_type": r.get("license_type"),
+                    "stripe_customer_id": r["stripe_customer_id"],
+                    "subscription_status": r["subscription_status"],
+                    "license_type": r["license_type"],
                 }
                 for r in rows
             ]

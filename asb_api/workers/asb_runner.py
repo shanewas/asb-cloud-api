@@ -1,3 +1,5 @@
+import json
+import os
 import uuid
 from playwright.async_api import async_playwright
 
@@ -23,6 +25,19 @@ class ASBRunner:
     async def close(self):
         await self.__aexit__()
 
+    @staticmethod
+    def _prepare_body(headers, data):
+        request_headers = dict(headers or {})
+        if data is None:
+            return request_headers, None
+        if isinstance(data, (str, bytes)):
+            return request_headers, data
+
+        has_content_type = any(k.lower() == "content-type" for k in request_headers)
+        if not has_content_type:
+            request_headers["Content-Type"] = "application/json"
+        return request_headers, json.dumps(data)
+
     async def run(self, url, method, headers, data, proxy, fingerprint, timeout, screenshot):
         proxy_config = None
         if proxy and proxy.host != "DIRECT":
@@ -32,27 +47,38 @@ class ASBRunner:
                 "password": proxy.password,
             }
 
+        request_headers, request_body = self._prepare_body(headers, data)
         context = await self.browser.new_context(
             user_agent=fingerprint.user_agent,
             viewport={"width": fingerprint.viewport[0], "height": fingerprint.viewport[1]},
             proxy=proxy_config,
-            extra_http_headers=headers or {},
+            extra_http_headers=request_headers,
         )
         page = await context.new_page()
 
         try:
-            if method == "POST":
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            if method.upper() == "POST":
+                response = await context.request.fetch(
+                    url,
+                    method="POST",
+                    headers=request_headers,
+                    data=request_body,
+                    timeout=timeout * 1000,
+                )
+                html = await response.text()
+                await page.set_content(html, wait_until="domcontentloaded", timeout=timeout * 1000)
             else:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                html = await page.content()
 
-            html = await page.content()
             cookies = await context.cookies()
             headers_out = dict(response.headers) if response else {}
 
             screenshot_url = None
             if screenshot:
-                screenshot_url = f"/tmp/screenshots/{uuid.uuid4().hex}.png"
+                screenshot_dir = os.environ.get("ASB_SCREENSHOT_DIR", "/tmp/screenshots")
+                os.makedirs(screenshot_dir, exist_ok=True)
+                screenshot_url = os.path.join(screenshot_dir, f"{uuid.uuid4().hex}.png")
                 await page.screenshot(path=screenshot_url)
 
             return {

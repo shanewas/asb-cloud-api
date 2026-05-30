@@ -31,16 +31,17 @@ class ASBWorker:
     async def scrape(self, request: ScrapeRequest) -> ScrapeResponse:
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         start = time.monotonic()
-
         proxy = None
-        if self.provider.name != "null":
-            proxy = await self.provider.get_proxy(request.region)
-
-        fp = self.fingerprint_generator.get(
-            request.fingerprint or "general"
-        )
+        fp = None
 
         try:
+            if self.provider.name != "null":
+                proxy = await self.provider.get_proxy(request.region)
+
+            fp = self.fingerprint_generator.get(
+                request.fingerprint or "general"
+            )
+
             result = await self.runner.run(
                 url=request.url,
                 method=request.method,
@@ -81,7 +82,7 @@ class ASBWorker:
                     request_id=request_id,
                     provider=self.provider.name,
                     region=request.region,
-                    fingerprint_id="",
+                    fingerprint_id=getattr(fp, "user_agent", "")[:50] if fp else "",
                     worker_id=self.worker_id,
                     duration_ms=duration_ms,
                     block_detected=False,

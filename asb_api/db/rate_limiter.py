@@ -1,6 +1,7 @@
 import hashlib
 import time
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from .connection import db
 
@@ -43,6 +44,7 @@ class PostgresRateLimiter:
             return True, -1, 0
 
         lock_id = self._lock_id(key_id)
+        now_dt = datetime.now(timezone.utc)
         now = time.time()
         reset_at = int(now + window_seconds)
 
@@ -59,7 +61,7 @@ class PostgresRateLimiter:
                         raise RateLimitExceeded(max_requests, 0, reset_at)
 
                 try:
-                    cutoff = now - window_seconds
+                    cutoff = now_dt - timedelta(seconds=window_seconds)
                     count_row = await conn.fetchrow(
                         """SELECT COUNT(*) as cnt FROM usage_records
                            WHERE key_id = $1 AND created_at > $2""",

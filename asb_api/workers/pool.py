@@ -51,11 +51,17 @@ class RegionWorkerPool:
         self.pools: dict[str, asyncio.Semaphore] = {}
         self.workers: dict[str, list[ASBWorker]] = {}
         for region, size in workers_per_region.items():
-            self.pools[region] = asyncio.Semaphore(size)
+            self.pools[region] = asyncio.BoundedSemaphore(size)
             self.workers[region] = [
                 ASBWorker(f"worker-{region}-{i}", provider, fingerprint_generator)
                 for i in range(size)
             ]
+
+    def _normalize_region(self, region: str | None = None) -> str:
+        region = region or self.default_region
+        if region not in self.pools:
+            return self.default_region
+        return region
 
     async def start_all(self):
         for region_workers in self.workers.values():
@@ -68,22 +74,23 @@ class RegionWorkerPool:
                 await w.stop()
 
     async def acquire(self, region: str | None = None) -> ASBWorker:
-        region = region or self.default_region
-        if region not in self.pools:
-            region = self.default_region
+        region = self._normalize_region(region)
         await self.pools[region].acquire()
         for w in self.workers[region]:
             if not getattr(w, "_busy", False):
                 w._busy = True
+                w._lease_region = region
                 return w
         self.workers[region][0]._busy = True
+        self.workers[region][0]._lease_region = region
         return self.workers[region][0]
 
     def release(self, worker: ASBWorker, region: str | None = None):
-        region = region or self.default_region
+        region = getattr(worker, "_lease_region", None) or self._normalize_region(region)
         worker._busy = False
-        if region in self.pools:
-            self.pools[region].release()
+        if hasattr(worker, "_lease_region"):
+            delattr(worker, "_lease_region")
+        self.pools[region].release()
 
     def get_status(self) -> dict:
         status = {}

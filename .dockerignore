@@ -1,8 +1,14 @@
 __pycache__
 .git
+.clawpatch
+.env
+.env.*
 .venv
 tests
 *.pyc
 .hermes
+build
+dist
+*.egg-info
 *.md
 !requirements.txt
