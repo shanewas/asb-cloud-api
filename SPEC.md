@@ -241,7 +241,7 @@ Rules:
 - `POST` sends `data` upstream as the request body. Dict-like data is JSON serialized unless the caller supplies a `Content-Type`.
 - `POST` response text is loaded into the browser page before screenshot capture.
 - `timeout` is in seconds.
-- `screenshot=true` returns a local screenshot path in self-hosted mode.
+- `screenshot=true` returns a local screenshot path in self-hosted mode (absolute server FS path when enabled).
 - `session_id` requires an existing session owned by the authenticated key.
 - `stateful_reset` clears stored cookies before the request.
 
@@ -609,6 +609,7 @@ STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
 LICENSE_SECRET_KEY=...
 ASB_SCREENSHOT_DIR=/tmp/screenshots
+# (or configure screenshots.enabled + screenshots.dir in config.yaml)
 ```
 
 ## 16. Verification Plan
@@ -626,17 +627,15 @@ The following items from the original list are now covered by automated tests in
 
 1. Start API in in-memory mode.
 3. Call `GET /v1/health`.
-4. Call `POST /v1/scrape` with GET (against a mocked local response).
-5. Call `POST /v1/scrape` with POST data (simulated local echo) and verify method/body handling.
-6. Create a session, use it in a scrape, verify cookies and request count update + ownership isolation.
-7. Request a screenshot and verify the returned path exists and is readable.
-10. Verify usage counters are incremented and exposed via `GET /v1/usage` (in-memory path).
+4. Call `POST /v1/scrape` with GET (against example.com or mocked).
+5. Call `POST /v1/scrape` with POST data and verify method/body handling.
+6. Create a session, use it in a scrape, verify cookies, count update, and ownership isolation.
+7. Request a screenshot and verify the returned path exists under the configured dir (or ASB_SCREENSHOT_DIR) when enabled; null when disabled.
+8. Start with PostgreSQL and run migrations (via docker compose or local Postgres).
+9. Create, verify, list, and revoke API keys with the admin CLI.
+10. Verify usage counters/rows are incremented and exposed via `GET /v1/usage` (in-memory and Postgres paths).
 
-Remaining items that still require manual steps or extra infrastructure:
-8. Start with PostgreSQL and run migrations (use `docker compose` or a local Postgres).
-9. Create, verify, list, and revoke API keys with the admin CLI (see `asb_api/admin.py`).
-
-The automated smoke suite deliberately avoids real browsers, real proxy providers, external websites, Stripe, and PostgreSQL so it remains fast and deterministic in CI.
+The automated smoke suite (`tests/test_smoke.py`) covers the fast deterministic subset and deliberately avoids real browsers, external sites, Stripe, and live Postgres. PostgreSQL + full key flows remain manual or compose-based.
 
 ## 17. Legal & Licensing
 
@@ -678,13 +677,32 @@ Self-hosted deployments using `self_hosted.enabled=true` and an optional license
 | 2026-05-30 | Runtime billing and license-verification features are OSS-licensed configuration options; they do not alter or conflict with the Apache-2.0 terms. | Maintainer |
 | 2026-05-30 | Operators who offer paid hosting, support, or closed-source extensions based on this code may do so under their own commercial terms without a separate grant from this project. | Maintainer |
 
-## 18. Known Release Blockers
+## 18. Screenshots (v1 Delivery Model)
+
+**Decision:** v1 supports the local self-hosted filesystem path model only.
+
+- `screenshot_url` (when non-null) is an absolute path on the API server's local filesystem to the captured PNG.
+- Self-hosted users configure `screenshots.dir` (or `ASB_SCREENSHOT_DIR`) and retrieve files using bind mounts, shared volumes, sidecar containers, or host-local post-processing.
+- `screenshot=true` is honored when `screenshots.enabled: true` (the default). The directory is created on first capture.
+- For cloud/SaaS deployments (where remote clients have no filesystem access to the server), set `screenshots.enabled: false`. Scrape requests with `screenshot=true` succeed with `screenshot_url: null`; no internal paths are ever returned to clients.
+- Retention policy, cleanup, and storage quotas are the operator's responsibility. No auto-deletion or background purge job exists in v1. Recommended: use a tmpfs/ramdisk for the dir, or run a periodic cleanup (for example, `find -mtime +1 -delete`).
+- Future (post-v1) object storage / signed URL backends remain out of scope per the original release contract.
+
+This choice:
+- Keeps the `screenshot_url` field semantics stable (string path or null).
+- Satisfies self-hosted use cases without new infrastructure.
+- Prevents leakage of host filesystem details in remote/cloud deployments.
+- Avoids adding heavy dependencies (object storage SDKs, signing, lifecycle workers) to the v1 surface.
+
+See README.md "Screenshots" section and `config.yaml` for the concrete configuration keys.
+
+## 19. Known Release Blockers
 
 These must be fixed before a public paid launch:
 
 - Verify Stripe checkout and webhook behavior in test mode.
 
-## 19. Release Decision
+## 20. Release Decision
 
 The API may be released privately to beta users when:
 

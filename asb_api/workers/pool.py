@@ -10,12 +10,19 @@ class WorkerPool:
         size: int,
         provider: ProxyProviderInterface,
         fingerprint_generator: FingerprintGenerator,
+        screenshot_dir: str | None = None,
         fallback_provider: ProxyProviderInterface | None = None,
     ):
         self.size = size
         self.semaphore = asyncio.Semaphore(size)
         self.workers = [
-            ASBWorker(f"worker-{i}", provider, fingerprint_generator, fallback_provider=fallback_provider)
+            ASBWorker(
+                f"worker-{i}",
+                provider,
+                fingerprint_generator,
+                screenshot_dir=screenshot_dir,
+                fallback_provider=fallback_provider,
+            )
             for i in range(size)
         ]
 
@@ -47,6 +54,7 @@ class RegionWorkerPool:
         provider: ProxyProviderInterface,
         fingerprint_generator: FingerprintGenerator,
         default_region: str = "jp",
+        screenshot_dir: str | None = None,
         fallback_provider: ProxyProviderInterface | None = None,
     ):
         self.default_region = default_region
@@ -55,7 +63,13 @@ class RegionWorkerPool:
         for region, size in workers_per_region.items():
             self.pools[region] = asyncio.BoundedSemaphore(size)
             self.workers[region] = [
-                ASBWorker(f"worker-{region}-{i}", provider, fingerprint_generator, fallback_provider=fallback_provider)
+                ASBWorker(
+                    f"worker-{region}-{i}",
+                    provider,
+                    fingerprint_generator,
+                    screenshot_dir=screenshot_dir,
+                    fallback_provider=fallback_provider,
+                )
                 for i in range(size)
             ]
 

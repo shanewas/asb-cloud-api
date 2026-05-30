@@ -74,6 +74,7 @@ if load_config().get("billing", {}).get("enabled", False):
 async def startup():
     global _worker_pool, _health_checker, _db
     config = load_config()
+    billing_enabled = config.get("billing", {}).get("enabled", False)
 
     # === Phase 2: Connect to PostgreSQL and run migrations ===
     db_cfg = config.get("database", {})
@@ -126,11 +127,23 @@ async def startup():
     workers_per_region = pool_cfg.get("workers_per_region", {"jp": 5})
     default_region = pool_cfg.get("default_region", "jp")
 
+    # Screenshot config (v1: local FS paths only; disable in pure cloud/SaaS deployments)
+    screenshots_cfg = config.get("screenshots", {}) or {}
+    screenshot_enabled = screenshots_cfg.get("enabled", True)
+    screenshot_dir = None
+    if screenshot_enabled:
+        screenshot_dir = (
+            screenshots_cfg.get("dir")
+            or os.environ.get("ASB_SCREENSHOT_DIR")
+            or "/tmp/screenshots"
+        )
+
     pool = RegionWorkerPool(
         workers_per_region=workers_per_region,
         provider=primary_breaker,
         fingerprint_generator=fp_gen,
         default_region=default_region,
+        screenshot_dir=screenshot_dir,
         fallback_provider=fallback_breaker,
     )
     await pool.start_all()
@@ -212,7 +225,11 @@ async def startup():
     set_health_context(pool, breakers, registry)
 
     fb_name = fallback_name if fallback_breaker else None
-    logger.info(f"ASB Cloud API started with primary={primary_name}, fallback={fb_name}, regions={list(workers_per_region.keys())}")
+    screenshot_mode = "enabled" if screenshot_dir else "disabled"
+    logger.info(
+        f"ASB Cloud API started with primary={primary_name}, fallback={fb_name}, "
+        f"regions={list(workers_per_region.keys())}, screenshots={screenshot_mode}"
+    )
 
 
 @app.on_event("shutdown")

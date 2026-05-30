@@ -117,6 +117,13 @@ database:
   min_pool: 5
   max_pool: 20
 
+# Screenshots (v1: local filesystem only)
+# - enabled: set false for pure cloud/SaaS deployments where clients have no FS access
+# - dir: output directory; use Docker volumes or bind mounts for retrieval in self-hosted
+screenshots:
+  enabled: true
+  dir: "${ASB_SCREENSHOT_DIR:/tmp/screenshots}"
+
 # ============================================
 # DASHBOARD CORS (for customer dashboard SPA; see docs/DASHBOARD_ARCHITECTURE.md)
 # Secure by default: no origins => no CORS middleware (no wildcard).
@@ -127,4 +134,3 @@ database:
 #     - "http://localhost:5173"
 #     - "https://dashboard.example.com"
 # Or via env: DASHBOARD_ORIGINS=http://localhost:5173,https://dash.example.com
-

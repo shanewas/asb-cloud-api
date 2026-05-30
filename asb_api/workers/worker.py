@@ -13,12 +13,14 @@ class ASBWorker:
         worker_id: str,
         provider: ProxyProviderInterface,
         fingerprint_generator: FingerprintGenerator,
+        screenshot_dir: str | None = None,
         fallback_provider: ProxyProviderInterface | None = None,
     ):
         self.worker_id = worker_id
         self.provider = provider
         self.fallback_provider = fallback_provider
         self.fingerprint_generator = fingerprint_generator
+        self.screenshot_dir = screenshot_dir
         self.runner: ASBRunner | None = None
         self._busy = False
 
@@ -76,6 +78,7 @@ class ASBWorker:
                 fingerprint=fp,
                 timeout=request.timeout,
                 screenshot=request.screenshot,
+                screenshot_dir=self.screenshot_dir,
             )
             duration_ms = int((time.monotonic() - start) * 1000)
             return ScrapeResponse(
