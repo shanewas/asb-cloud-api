@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends
-from urllib.parse import urlparse
 from typing import Any
 from asb_api.session.models import ScrapeRequest, ScrapeResponse
 from asb_api.workers.pool import RegionWorkerPool
@@ -9,6 +8,7 @@ from asb_api.api.usage import UsageTracker
 from asb_api.session.store import SessionStore
 from asb_api.api.routes.sessions import ensure_session_owner
 from asb_api.api.errors import APIError
+from asb_api.security import validate_scrape_url, redact_url_for_logging
 
 router = APIRouter()
 pool: RegionWorkerPool | None = None
@@ -40,6 +40,9 @@ async def scrape(
     request: ScrapeRequest,
     key_id: str = Depends(get_api_key),
 ):
+    # URL safety check (scheme + optional private network block) — must happen before any worker or external work
+    validate_scrape_url(request.url)
+
     key_store = get_key_store()
     # Support async (Postgres) or sync (InMemory) get()
     api_key = key_store.get(key_id)
@@ -88,7 +91,7 @@ async def scrape(
             if hasattr(usage_tracker, "record"):
                 domain = None
                 try:
-                    domain = urlparse(request.url).netloc or request.url.split("/")[2] if "://" in request.url else request.url.split("/")[0]
+                    domain = redact_url_for_logging(request.url, domains_only=True)
                 except Exception:
                     domain = None
                 meta = getattr(result, "metadata", None)

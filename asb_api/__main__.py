@@ -105,6 +105,10 @@ async def startup():
     security_cfg = config.get("security", {})
     encryption_key = security_cfg.get("cookie_encryption_key")
 
+    # Wire security config (URL safety + log redaction rules) for use by routes and utilities
+    from asb_api.security import set_security_config
+    set_security_config(config)
+
     # === Phase 2: Wire PostgreSQL-backed stores (replace in-memory) ===
     if dsn:
         from asb_api.db.auth_store import PostgresKeyStore
