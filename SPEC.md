@@ -36,7 +36,7 @@ This release must not depend on dashboard, Redis, multi-region orchestration, or
 
 ### Out of Scope for v1
 
-- Customer dashboard.
+- Customer dashboard (see [docs/DASHBOARD_ARCHITECTURE.md](docs/DASHBOARD_ARCHITECTURE.md) for architecture proposal).
 - Self-service signup.
 - ~~Python, Node, or CLI SDKs~~ (implemented post-v1; see clients/ and issue #10).
 - Bulk scrape endpoint.

@@ -116,3 +116,15 @@ database:
   dsn: "${DATABASE_URL}"
   min_pool: 5
   max_pool: 20
+
+# ============================================
+# DASHBOARD CORS (for customer dashboard SPA; see docs/DASHBOARD_ARCHITECTURE.md)
+# Secure by default: no origins => no CORS middleware (no wildcard).
+# Set via env or here. Comma-separated or list.
+# ============================================
+# dashboard:
+#   origins:
+#     - "http://localhost:5173"
+#     - "https://dashboard.example.com"
+# Or via env: DASHBOARD_ORIGINS=http://localhost:5173,https://dash.example.com
+
