@@ -15,6 +15,7 @@ The format follows the spirit of Keep a Changelog, and this project uses semanti
 - Stripe billing test-mode runbook.
 - Redis rate limiting evaluation document (`docs/REDIS_RATE_LIMITING.md`) with scale thresholds, algorithm comparison, data model, and migration plan. Closes #12.
 - Customer dashboard architecture proposal (`docs/DASHBOARD_ARCHITECTURE.md`) with API endpoint inventory, auth flow, CORS plan, and phased implementation roadmap. Closes #9.
+- Official thin clients (Python `asb-cloud-client`, Node `asb-cloud-client`, CLI `asb-cli`) + examples. See `clients/` and issue #10.
 
 ### Fixed
 

@@ -13,7 +13,7 @@ The first releasable version must prove one narrow promise:
 
 > An authenticated customer can call `POST /v1/scrape` and receive a reliable browser-rendered response with predictable rate limits, session behavior, provider routing, usage tracking, and deployable self-hosted packaging.
 
-This release must not depend on dashboard, SDK, Redis, multi-region orchestration, or automated signup. Those are post-release features.
+This release must not depend on dashboard, Redis, multi-region orchestration, or automated signup. SDKs/CLI were added post-v1 (see clients/ and GitHub issue #10).
 
 ## 2. Release Scope
 
@@ -38,7 +38,7 @@ This release must not depend on dashboard, SDK, Redis, multi-region orchestratio
 
 - Customer dashboard (see [docs/DASHBOARD_ARCHITECTURE.md](docs/DASHBOARD_ARCHITECTURE.md) for architecture proposal).
 - Self-service signup.
-- Python, Node, or CLI SDKs.
+- ~~Python, Node, or CLI SDKs~~ (implemented post-v1; see clients/ and issue #10).
 - Bulk scrape endpoint.
 - Redis rate limiting (see [docs/REDIS_RATE_LIMITING.md](docs/REDIS_RATE_LIMITING.md) for evaluation and migration plan).
 - ClickHouse or analytics warehouse.
