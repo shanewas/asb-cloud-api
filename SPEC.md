@@ -40,7 +40,7 @@ This release must not depend on dashboard, SDK, Redis, multi-region orchestratio
 - Self-service signup.
 - Python, Node, or CLI SDKs.
 - Bulk scrape endpoint.
-- Redis rate limiting.
+- Redis rate limiting (see [docs/REDIS_RATE_LIMITING.md](docs/REDIS_RATE_LIMITING.md) for evaluation and migration plan).
 - ClickHouse or analytics warehouse.
 - Auto-scaling and multi-VPS worker scheduling.
 - Public CDN-backed screenshot hosting.
@@ -473,6 +473,14 @@ Usage tracking rules:
 - Usage rows include key, request ID, domain, status, duration, block flag, region, and creation time.
 - Daily rollups must be idempotent.
 - Overage behavior must be tested before billing is enabled.
+
+### Backends
+
+| Backend | Module | Scale | Notes |
+|---------|--------|-------|-------|
+| In-memory sliding window | `asb_api.api.rate_limiter.SlidingWindowLimiter` | Single process | Dev mode. Restart loses state. Not safe across multiple API processes. |
+| PostgreSQL advisory lock | `asb_api.db.rate_limiter.PostgresRateLimiter` | Single DB, 1-3 API processes | Production for v1. Counts `usage_records` rows via advisory-lock serialization. |
+| Redis (post-v1) | (future) | Multi-process, multi-region | Evaluated in [docs/REDIS_RATE_LIMITING.md](docs/REDIS_RATE_LIMITING.md). Recommended when >1 API process or >100 req/s per key.
 
 ## 14. Security Requirements
 

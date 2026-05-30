@@ -13,6 +13,7 @@ The format follows the spirit of Keep a Changelog, and this project uses semanti
 - Regression tests for worker pool release behavior, proxy lease cleanup, and POST body serialization.
 - `GET /v1/usage` route with in-memory and PostgreSQL usage tracker support.
 - Stripe billing test-mode runbook.
+- Redis rate limiting evaluation document (`docs/REDIS_RATE_LIMITING.md`) with scale thresholds, algorithm comparison, data model, and migration plan. Closes #12.
 
 ### Fixed
 

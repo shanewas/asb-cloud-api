@@ -1,7 +1,21 @@
 import time
 import asyncio
 from collections import deque
+from typing import Protocol
 from fastapi import HTTPException
+
+
+class RateLimiter(Protocol):
+    """Interface for rate limiter backends (in-memory, PostgreSQL, Redis).
+
+    All implementations must provide:
+      - check(key_id, tier) -> (allowed: bool, remaining: int, reset_at: int)
+      - Raise RateLimitExceeded on denial (HTTP 429 with headers).
+      - Optionally raise OverageLimitExceeded for monthly overage (HTTP 402).
+    """
+    limits_by_tier: dict
+
+    async def check(self, key_id: str, tier: str = "free") -> tuple[bool, int, int]: ...
 
 
 class RateLimitExceeded(HTTPException):
