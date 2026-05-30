@@ -143,6 +143,12 @@ python -m unittest discover -s tests -v
 python -m pytest
 ```
 
+Run the automated release smoke tests (covers the key items from SPEC §16 without external services):
+
+```bash
+python -m unittest tests.test_smoke -v
+```
+
 Generate a Clawpatch report if the local provider is available:
 
 ```bash
