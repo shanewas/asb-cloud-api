@@ -131,9 +131,11 @@ async def startup():
             pass
         set_key_store(key_store)
 
-        # Phase 3: wire webhook store (uses same PostgresKeyStore)
-        from asb_api.api.routes.webhooks import set_store as set_webhook_store
-        set_webhook_store(key_store)
+        # Phase 3: wire webhook store ONLY when billing routes are mounted (see top-level guard).
+        # Prevents import of Stripe-backed webhook code in billing-disabled deployments.
+        if billing_enabled:
+            from asb_api.api.routes.webhooks import set_store as set_webhook_store
+            set_webhook_store(key_store)
 
         limits_cfg = config.get("rate_limits", {})
         ut = PostgresUsageTracker()

@@ -2,16 +2,13 @@ import asyncio
 import json
 import unittest
 
-try:
-    from asb_api.providers.base import ProxyConfig
+from asb_api.providers.base import ProxyConfig
 from asb_api.session.models import ScrapeRequest
 from asb_api.workers.asb_runner import ASBRunner
 from asb_api.workers.pool import RegionWorkerPool
 from asb_api.workers.worker import ASBWorker
-except ModuleNotFoundError as exc:
-    if exc.name == "playwright":
-        raise unittest.SkipTest("playwright is not installed in this interpreter") from exc
-    raise
+
+# Optional playwright skip is not needed here (no direct playwright imports in this regression file)
 
 
 class FakeProvider:
