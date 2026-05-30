@@ -39,6 +39,12 @@ class ASBRunner:
         return request_headers, json.dumps(data)
 
     async def run(self, url, method, headers, data, proxy, fingerprint, timeout, screenshot, screenshot_dir: str | None = None):
+        method_upper = (method or "GET").upper()
+        if method_upper not in {"GET", "POST"}:
+            raise ValueError(f"Unsupported scrape method: {method_upper}")
+        if self.browser is None:
+            raise RuntimeError("ASBRunner has not been started")
+
         proxy_config = None
         if proxy and proxy.host != "DIRECT":
             proxy_config = {
@@ -57,7 +63,7 @@ class ASBRunner:
         page = await context.new_page()
 
         try:
-            if method.upper() == "POST":
+            if method_upper == "POST":
                 response = await context.request.fetch(
                     url,
                     method="POST",

@@ -60,6 +60,7 @@ app.include_router(licenses.router)
 
 _worker_pool: RegionWorkerPool | None = None
 _health_checker: ProviderHealthChecker | None = None
+_provider_registry: ProviderRegistry | None = None
 _db = None
 
 if load_config().get("billing", {}).get("enabled", False):
@@ -72,7 +73,7 @@ if load_config().get("billing", {}).get("enabled", False):
 
 @app.on_event("startup")
 async def startup():
-    global _worker_pool, _health_checker, _db
+    global _worker_pool, _health_checker, _provider_registry, _db
     config = load_config()
     billing_enabled = config.get("billing", {}).get("enabled", False)
 
@@ -95,6 +96,8 @@ async def startup():
 
     registry = ProviderRegistry()
     registry.initialize_from_config(config.get("providers", {}))
+    await registry.start_all()
+    _provider_registry = registry
 
     priority_cfg = config.get("provider_priority", {})
     primary_name = priority_cfg.get("primary", "null")
@@ -105,10 +108,6 @@ async def startup():
         provider = registry.get(name)
         breakers[name] = CircuitBreaker(provider, failure_threshold=3, recovery_timeout=60)
 
-    primary_breaker = breakers.get(primary_name, breakers.get("null"))
-    if not primary_breaker:
-        primary_breaker = CircuitBreaker(registry.get("null"))
-
     fallback_breaker = None
     if fallback_name and fallback_name != primary_name:
         fallback_breaker = breakers.get(fallback_name)
@@ -116,6 +115,18 @@ async def startup():
             # If fallback is configured but not yet in breakers (edge case)
             fb_provider = registry.get(fallback_name)
             fallback_breaker = CircuitBreaker(fb_provider, failure_threshold=3, recovery_timeout=60)
+
+    primary_breaker = breakers.get(primary_name)
+    if not primary_breaker:
+        if fallback_breaker is not None:
+            logger.warning("Primary provider %s unavailable; using configured fallback %s", primary_name, fallback_name)
+            primary_breaker = fallback_breaker
+            fallback_breaker = None
+        else:
+            logger.warning("Primary provider %s unavailable; using null provider", primary_name)
+            primary_breaker = breakers.get("null")
+            if not primary_breaker:
+                primary_breaker = CircuitBreaker(registry.get("null"))
 
     health_checker = ProviderHealthChecker(breakers, check_interval=30)
     await health_checker.start()
@@ -245,6 +256,11 @@ async def shutdown():
             await _worker_pool.stop_all()
         except Exception:
             logger.exception("Failed to stop worker pool")
+    if _provider_registry:
+        try:
+            await _provider_registry.stop_all()
+        except Exception:
+            logger.exception("Failed to stop providers")
     if _db:
         try:
             await _db.disconnect()

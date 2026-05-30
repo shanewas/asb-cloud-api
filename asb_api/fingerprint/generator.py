@@ -16,13 +16,29 @@ class FingerprintGenerator:
     def __init__(self, presets: dict):
         self.presets = presets
 
+    @staticmethod
+    def _validate_viewport(value) -> tuple[int, int]:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError("Fingerprint viewport must contain exactly two integers")
+        try:
+            width, height = int(value[0]), int(value[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Fingerprint viewport must contain exactly two integers") from exc
+        return width, height
+
+    @staticmethod
+    def _validate_canvas(value) -> Literal["noise", "empty", "off"]:
+        if value not in {"noise", "empty", "off"}:
+            raise ValueError("Fingerprint canvas must be one of: noise, empty, off")
+        return value
+
     def get(self, preset_name: str) -> Fingerprint:
         cfg = self.presets.get(preset_name, self.presets.get("general", {}))
         return Fingerprint(
             user_agent=cfg.get("user_agent", ""),
-            viewport=tuple(cfg.get("viewport", [1920, 1080])),
+            viewport=self._validate_viewport(cfg.get("viewport", [1920, 1080])),
             webgl_vendor=cfg.get("webgl_vendor", ""),
-            canvas=cfg.get("canvas", "off"),
+            canvas=self._validate_canvas(cfg.get("canvas", "off")),
             accept_language=cfg.get("accept_language"),
             platform=cfg.get("platform"),
         )

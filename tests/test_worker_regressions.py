@@ -5,7 +5,7 @@ import unittest
 from asb_api.providers.base import ProxyConfig
 from asb_api.session.models import ScrapeRequest
 from asb_api.workers.asb_runner import ASBRunner
-from asb_api.workers.pool import RegionWorkerPool
+from asb_api.workers.pool import RegionWorkerPool, WorkerPool
 from asb_api.workers.worker import ASBWorker
 
 # Optional playwright skip is not needed here (no direct playwright imports in this regression file)
@@ -71,11 +71,47 @@ class WorkerRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_proxy_is_released_when_fingerprint_setup_fails(self):
         provider = FakeProvider()
         worker = ASBWorker("worker-test", provider, BrokenFingerprintGenerator())
+        worker.runner = object()
 
         response = await worker.scrape(ScrapeRequest(url="https://example.com"))
 
         self.assertEqual(response.status, "error")
         self.assertEqual(provider.released, 1)
+
+    async def test_unstarted_worker_returns_lifecycle_error(self):
+        worker = ASBWorker("worker-test", FakeProvider(), FakeFingerprintGenerator())
+
+        response = await worker.scrape(ScrapeRequest(url="https://example.com"))
+
+        self.assertEqual(response.status, "error")
+        self.assertEqual(response.error_code, "WORKER_NOT_STARTED")
+
+    async def test_worker_pool_never_returns_busy_worker(self):
+        pool = WorkerPool(1, FakeProvider(), FakeFingerprintGenerator())
+        pool.workers[0]._busy = True
+
+        with self.assertRaises(RuntimeError):
+            await asyncio.wait_for(pool.acquire(), timeout=0.1)
+
+        pool.workers[0]._busy = False
+        worker = await asyncio.wait_for(pool.acquire(), timeout=0.1)
+        pool.release(worker)
+
+    async def test_region_pool_never_returns_busy_worker(self):
+        pool = RegionWorkerPool(
+            {"jp": 1},
+            provider=FakeProvider(),
+            fingerprint_generator=FakeFingerprintGenerator(),
+            default_region="jp",
+        )
+        pool.workers["jp"][0]._busy = True
+
+        with self.assertRaises(RuntimeError):
+            await asyncio.wait_for(pool.acquire("jp"), timeout=0.1)
+
+        pool.workers["jp"][0]._busy = False
+        worker = await asyncio.wait_for(pool.acquire("jp"), timeout=0.1)
+        pool.release(worker)
 
 
 class RunnerRegressionTests(unittest.TestCase):
@@ -84,6 +120,23 @@ class RunnerRegressionTests(unittest.TestCase):
 
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(json.loads(body), {"a": 1})
+
+    def test_unsupported_method_is_rejected_before_browser_use(self):
+        runner = ASBRunner()
+
+        with self.assertRaises(ValueError):
+            asyncio.run(
+                runner.run(
+                    "https://example.com",
+                    "PUT",
+                    {},
+                    None,
+                    None,
+                    type("FP", (), {"user_agent": "ua", "viewport": (800, 600)})(),
+                    1,
+                    False,
+                )
+            )
 
 
 class ScreenshotConfigRegressionTests(unittest.TestCase):

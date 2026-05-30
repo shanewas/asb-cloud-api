@@ -1,22 +1,11 @@
 import uuid
 import time
 import asyncio
-from dataclasses import dataclass, field
+import json
 
 from cryptography.fernet import Fernet
 
-
-@dataclass
-class SessionInfo:
-    session_id: str
-    key_id: str
-    region: str
-    fingerprint: str | None = None
-    cookies: dict = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
-    last_used: float = field(default_factory=time.time)
-    request_count: int = 0
-    expires_at: float = 0
+from asb_api.session.models import SessionInfo
 
 
 class SessionStore:
@@ -37,6 +26,26 @@ class SessionStore:
             return self.fernet.decrypt(data)
         return data
 
+    def _store_cookies(self, cookies: dict) -> dict | str:
+        if not self.fernet:
+            return dict(cookies or {})
+        encoded = json.dumps(cookies or {}, separators=(",", ":")).encode()
+        return self._encrypt(encoded).decode()
+
+    def _load_cookies(self, stored: dict | str | None) -> dict:
+        if stored is None:
+            return {}
+        if not self.fernet:
+            return dict(stored) if isinstance(stored, dict) else {}
+        if isinstance(stored, str):
+            return json.loads(self._decrypt(stored.encode()).decode())
+        return dict(stored)
+
+    def _session_info_from_record(self, record: dict) -> SessionInfo:
+        data = dict(record)
+        data["cookies"] = self._load_cookies(data.get("cookies"))
+        return SessionInfo(**data)
+
     async def create(self, key_id: str, region: str, fingerprint: str | None = None) -> SessionInfo:
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         now = time.time()
@@ -45,7 +54,7 @@ class SessionStore:
             "key_id": key_id,
             "region": region,
             "fingerprint": fingerprint,
-            "cookies": {},
+            "cookies": self._store_cookies({}),
             "created_at": now,
             "last_used": now,
             "request_count": 0,
@@ -53,7 +62,7 @@ class SessionStore:
         }
         async with self._lock:
             self._sessions[session_id] = session
-        return SessionInfo(**session)
+        return self._session_info_from_record(session)
 
     async def get(self, session_id: str) -> SessionInfo | None:
         async with self._lock:
@@ -64,12 +73,12 @@ class SessionStore:
                 del self._sessions[session_id]
                 return None
             s["last_used"] = time.time()
-            return SessionInfo(**s)
+            return self._session_info_from_record(s)
 
     async def update_cookies(self, session_id: str, cookies: dict):
         async with self._lock:
             if session_id in self._sessions:
-                self._sessions[session_id]["cookies"] = cookies
+                self._sessions[session_id]["cookies"] = self._store_cookies(cookies)
                 self._sessions[session_id]["last_used"] = time.time()
 
     async def increment_count(self, session_id: str):

@@ -48,21 +48,32 @@ class DecodoProvider(ProxyProviderInterface):
                         continue
         return pools
 
+    def _pool_keys(self, pools: dict[str, list[ProxyConfig]]) -> set[str]:
+        return {
+            self._proxy_key(proxy)
+            for proxies in pools.values()
+            for proxy in proxies
+        }
+
+    async def _replace_pool(self, new_pools: dict[str, list[ProxyConfig]]) -> None:
+        async with self._lock:
+            self._proxies = new_pools
+            self._in_use.intersection_update(self._pool_keys(new_pools))
+            self._last_refresh = asyncio.get_event_loop().time()
+
     async def _refresh_loop(self):
         while True:
             await asyncio.sleep(self.refresh_interval)
             try:
                 new_pools = await self._fetch_pool()
-                async with self._lock:
-                    self._proxies = new_pools
-                    self._in_use.clear()
-                    self._last_refresh = asyncio.get_event_loop().time()
+                await self._replace_pool(new_pools)
             except Exception:
                 pass
 
     async def start(self):
-        self._proxies = await self._fetch_pool()
-        self._last_refresh = asyncio.get_event_loop().time()
+        if self._refresh_task and not self._refresh_task.done():
+            return
+        await self._replace_pool(await self._fetch_pool())
         self._refresh_task = asyncio.create_task(self._refresh_loop())
 
     async def stop(self):
@@ -72,6 +83,7 @@ class DecodoProvider(ProxyProviderInterface):
                 await self._refresh_task
             except asyncio.CancelledError:
                 pass
+            self._refresh_task = None
 
     def _proxy_key(self, proxy: ProxyConfig) -> str:
         return f"{proxy.host}:{proxy.port}"

@@ -49,3 +49,15 @@ class ProviderRegistry:
                     api_key=api_key,
                     zones=zones,
                 )
+
+    async def start_all(self) -> None:
+        for provider in self._providers.values():
+            start = getattr(provider, "start", None)
+            if callable(start):
+                await start()
+
+    async def stop_all(self) -> None:
+        for provider in self._providers.values():
+            stop = getattr(provider, "stop", None)
+            if callable(stop):
+                await stop()

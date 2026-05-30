@@ -39,6 +39,24 @@ class ASBWorker:
         fp = None
         used_provider_name = self.provider.name
 
+        if self.runner is None:
+            return ScrapeResponse(
+                request_id=request_id,
+                status="error",
+                error_code="WORKER_NOT_STARTED",
+                message="Worker runner has not been started",
+                metadata=ScrapeMetadata(
+                    request_id=request_id,
+                    provider=used_provider_name,
+                    region=request.region,
+                    fingerprint_id="",
+                    worker_id=self.worker_id,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    block_detected=False,
+                    retries=0,
+                ),
+            )
+
         try:
             # Proxy acquisition with fallback support
             if self.provider.name != "null":

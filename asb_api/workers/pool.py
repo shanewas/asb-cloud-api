@@ -14,7 +14,8 @@ class WorkerPool:
         fallback_provider: ProxyProviderInterface | None = None,
     ):
         self.size = size
-        self.semaphore = asyncio.Semaphore(size)
+        self.semaphore = asyncio.BoundedSemaphore(size)
+        self._lease_lock = asyncio.Lock()
         self.workers = [
             ASBWorker(
                 f"worker-{i}",
@@ -36,11 +37,13 @@ class WorkerPool:
 
     async def acquire(self, region: str | None = None) -> ASBWorker:
         await self.semaphore.acquire()
-        for w in self.workers:
-            if not w._busy:
-                w._busy = True
-                return w
-        return self.workers[0]
+        async with self._lease_lock:
+            for w in self.workers:
+                if not w._busy:
+                    w._busy = True
+                    return w
+        self.semaphore.release()
+        raise RuntimeError("WorkerPool semaphore acquired but no idle worker was available")
 
     def release(self, worker: ASBWorker):
         worker._busy = False
@@ -59,9 +62,11 @@ class RegionWorkerPool:
     ):
         self.default_region = default_region
         self.pools: dict[str, asyncio.Semaphore] = {}
+        self._lease_locks: dict[str, asyncio.Lock] = {}
         self.workers: dict[str, list[ASBWorker]] = {}
         for region, size in workers_per_region.items():
             self.pools[region] = asyncio.BoundedSemaphore(size)
+            self._lease_locks[region] = asyncio.Lock()
             self.workers[region] = [
                 ASBWorker(
                     f"worker-{region}-{i}",
@@ -92,14 +97,14 @@ class RegionWorkerPool:
     async def acquire(self, region: str | None = None) -> ASBWorker:
         region = self._normalize_region(region)
         await self.pools[region].acquire()
-        for w in self.workers[region]:
-            if not getattr(w, "_busy", False):
-                w._busy = True
-                w._lease_region = region
-                return w
-        self.workers[region][0]._busy = True
-        self.workers[region][0]._lease_region = region
-        return self.workers[region][0]
+        async with self._lease_locks[region]:
+            for w in self.workers[region]:
+                if not getattr(w, "_busy", False):
+                    w._busy = True
+                    w._lease_region = region
+                    return w
+        self.pools[region].release()
+        raise RuntimeError(f"RegionWorkerPool semaphore acquired but no idle worker was available for region={region}")
 
     def release(self, worker: ASBWorker, region: str | None = None):
         region = getattr(worker, "_lease_region", None) or self._normalize_region(region)
