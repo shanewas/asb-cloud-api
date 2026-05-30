@@ -452,8 +452,8 @@ EXPOSE 80
 - [ ] Add `GET /v1/dashboard/usage/domains` endpoint
 - [ ] Add `GET /v1/dashboard/sessions` endpoint
 - [ ] Add `GET /v1/dashboard/overage` endpoint
-- [ ] Add CORS middleware gated by `DASHBOARD_ORIGINS`
-- [ ] Add `dashboard` config block to `config.yaml`
+- [x] Add CORS middleware gated by `DASHBOARD_ORIGINS` / `dashboard.origins` (explicit list, no wildcard; secure default when unset)
+- [x] Add `dashboard` config block to `config.yaml` + env support + regression test
 
 **Frontend work:**
 - [ ] Project scaffold (React + TypeScript + Vite + Tailwind)

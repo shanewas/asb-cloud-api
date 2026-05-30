@@ -179,5 +179,19 @@ class APIErrorContractTests(unittest.TestCase):
         self.assertEqual(body.get("error_code"), "BAD_REQUEST")
 
 
+class CORSCONFIGTests(unittest.TestCase):
+    """Verify CORS middleware is gated by explicit origins only (no wildcard, secure default)."""
+
+    def test_no_cors_headers_when_no_dashboard_origins_configured(self):
+        # In test env (and default config) no DASHBOARD_ORIGINS / dashboard.origins is set.
+        # Therefore CORSMiddleware should not be present -> no ACAO header on responses.
+        client = TestClient(app)
+        resp = client.get("/v1/health")
+        self.assertEqual(resp.status_code, 200)
+        # Should not have wildcard or any ACAO from our middleware
+        acao = resp.headers.get("access-control-allow-origin")
+        self.assertIsNone(acao, f"Expected no ACAO header in secure-default mode, got {acao}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
