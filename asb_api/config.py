@@ -3,13 +3,19 @@ import re
 import yaml
 from pathlib import Path
 
-_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+_ENV_VAR_RE = re.compile(r"\$\{([^}:]+)(?::(-)?([^\}]*))?\}")
 
 
 def _resolve_env(value):
     if isinstance(value, str):
         def _replace(m):
-            return os.environ.get(m.group(1), "")
+            var = m.group(1)
+            has_default = m.group(2) is not None or m.group(3) is not None  # : or :- or :default
+            default = m.group(3) if m.group(3) is not None else ""
+            val = os.environ.get(var)
+            if val is not None:
+                return val
+            return default
         return _ENV_VAR_RE.sub(_replace, value)
     if isinstance(value, dict):
         return {k: _resolve_env(v) for k, v in value.items()}
