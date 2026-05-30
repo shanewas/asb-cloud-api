@@ -4,8 +4,9 @@
 # persistence (migrations, API keys, sessions, usage records, audit log).
 #
 # Usage (from a fresh clone):
-#   1. (Optional but recommended) Generate a strong cookie key:
-#        python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   1. (Optional) A dev-only valid Fernet key is preconfigured below.
+#      To rotate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#      Then verify: python -c "from cryptography.fernet import Fernet; Fernet('your-new-key')"
 #   2. docker compose up -d --build
 #   3. Wait ~10-15s for DB + migrations + API startup.
 #   4. View the auto-created dev key:
@@ -48,8 +49,9 @@ services:
     environment:
       # PostgreSQL connection (uses Docker service name as hostname)
       DATABASE_URL: postgresql://asb:asb_dev_only_change_me@postgres:5432/asb_dev
-      # Required for session cookie encryption (generate your own for real use)
-      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-change-this-dev-only-32-bytes-minimum-please}
+      # Dev-only valid Fernet key for smoke stack (rotate for any real use).
+      # Verified valid: python -c "from cryptography.fernet import Fernet; Fernet('DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo=')"
+      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo=}
       ASB_CONFIG_PATH: config.yaml
       ASB_SCREENSHOT_DIR: /tmp/screenshots
       # Optional: enable billing only if you have Stripe test keys

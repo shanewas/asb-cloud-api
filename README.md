@@ -76,8 +76,11 @@ This stack satisfies the PostgreSQL verification requirements in `SPEC.md`. It l
 **One-time setup (fresh clone):**
 
 ```bash
-# 1. (Recommended) Generate a proper cookie encryption key
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# 1. A dev-only valid Fernet key is preconfigured in docker-compose.yml (and .env.example).
+#    It has been validated to prevent Fernet init crash on session store startup.
+#    To rotate for your own smoke runs:
+python -c "from cryptography.fernet import Fernet; k=Fernet.generate_key().decode(); print(k); Fernet(k); print('valid')"
+#    (The pre-set key: DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo= )
 
 # 2. Start the stack (builds the API image + starts Postgres)
 docker compose up -d --build
