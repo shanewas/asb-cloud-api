@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asb-cloud-client"
+version = "0.1.0"
+description = "Thin Python client for the ASB Cloud API (scrape, sessions, usage, billing)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "ASB Cloud API contributors" }
+]
+keywords = ["asb", "scraping", "browser", "api-client", "playwright"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP :: Browsers",
+  "Topic :: Software Development :: Libraries :: Python Modules"
+]
+dependencies = [
+  "httpx>=0.28.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "respx>=0.22.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/shanewas/asb-cloud-api/tree/master/clients/python"
+Issues = "https://github.com/shanewas/asb-cloud-api/issues"
+Documentation = "https://github.com/shanewas/asb-cloud-api/blob/master/clients/README.md"
+
+[tool.setuptools.packages.find]
+include = ["asb_client*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

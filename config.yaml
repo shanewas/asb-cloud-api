@@ -7,8 +7,11 @@ app:
 security:
   api_key_hash_algorithm: "sha256"
   cookie_encryption_key: "${COOKIE_ENCRYPTION_KEY}"
+  # Log redaction (see issue #8 and security module)
   log_url_domains_only: true
   redact_authorization_headers: true
+  # SSRF hardening: when true, rejects localhost/private IPs/metadata services in scrape URLs (recommended for cloud/public deployments)
+  block_private_networks: false
 
 providers:
   null:
@@ -113,3 +116,15 @@ database:
   dsn: "${DATABASE_URL}"
   min_pool: 5
   max_pool: 20
+
+# ============================================
+# DASHBOARD CORS (for customer dashboard SPA; see docs/DASHBOARD_ARCHITECTURE.md)
+# Secure by default: no origins => no CORS middleware (no wildcard).
+# Set via env or here. Comma-separated or list.
+# ============================================
+# dashboard:
+#   origins:
+#     - "http://localhost:5173"
+#     - "https://dashboard.example.com"
+# Or via env: DASHBOARD_ORIGINS=http://localhost:5173,https://dash.example.com
+

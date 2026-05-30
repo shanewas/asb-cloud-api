@@ -53,3 +53,26 @@ class ScrapeResponse:
     metadata: ScrapeMetadata | None = None
     error_code: str | None = None
     message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Bulk scrape (post-v1 design per issue #11)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BulkScrapeRequest:
+    items: list[ScrapeRequest]
+    max_concurrency: int = 8   # server will cap this
+
+
+@dataclass
+class BulkItemResult:
+    index: int
+    result: ScrapeResponse | None = None
+    error: dict | None = None          # {"error_code": "...", "message": "..."}
+
+
+@dataclass
+class BulkScrapeResponse:
+    results: list[BulkItemResult]
+    summary: dict = field(default_factory=dict)   # {"total": N, "succeeded": M, "failed": K}
