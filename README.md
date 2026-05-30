@@ -69,7 +69,80 @@ curl http://localhost:8000/v1/health
 
 For authenticated endpoints, copy the default development key from container startup logs or create a persistent key with the admin CLI in PostgreSQL mode.
 
+### Local PostgreSQL Smoke Stack (Docker Compose)
+
+This stack satisfies the PostgreSQL verification requirements in `SPEC.md`. It lets any contributor quickly validate migrations, persistent API keys, sessions, and usage tracking against a real database.
+
+**One-time setup (fresh clone):**
+
+```bash
+# 1. A dev-only valid Fernet key is preconfigured in docker-compose.yml (and .env.example).
+#    It has been validated to prevent Fernet init crash on session store startup.
+#    To rotate for your own smoke runs:
+python -c "from cryptography.fernet import Fernet; k=Fernet.generate_key().decode(); print(k); Fernet(k); print('valid')"
+#    (The pre-set key: DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo= )
+
+# 2. Start the stack (builds the API image + starts Postgres)
+docker compose up -d --build
+```
+
+The first run will:
+- Create the PostgreSQL volume
+- Run all migrations automatically on API startup
+- Create a default development API key (visible in logs)
+
+**View the auto-created dev key:**
+
+```bash
+docker compose logs api | grep -i "default test api key"
+```
+
+**Full smoke flow (copy-paste friendly):**
+
+```bash
+# 1. Health (no auth)
+curl http://localhost:8000/v1/health
+
+# 2. Scrape (use the key printed above)
+export ASB_KEY="sk_live_xxxxxxxxxxxxxxxx"   # from the logs
+curl -X POST http://localhost:8000/v1/scrape \
+  -H "Authorization: Bearer $ASB_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","method":"GET","region":"jp"}'
+
+# 3. Create a stateful session
+curl -X POST http://localhost:8000/v1/sessions \
+  -H "Authorization: Bearer $ASB_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"region":"jp","fingerprint":"general"}'
+
+# 4. Check usage (should now show activity)
+curl http://localhost:8000/v1/usage \
+  -H "Authorization: Bearer $ASB_KEY"
+```
+
+**Create additional keys (optional):**
+
+```bash
+docker compose exec api python -m asb_api.admin create-key --tier starter --email smoke@test.local
+```
+
+**Teardown (completely clean slate):**
+
+```bash
+docker compose down -v     # removes containers + the postgres_data volume
+```
+
+**Notes**
+- The credentials in `docker-compose.yml` are **development/smoke only**. Change them before any real deployment.
+- Screenshots (if requested) are written inside the container to `/tmp/screenshots`.
+- The stack honors the same `config.yaml` and security settings as normal Docker runs.
+- For even easier testing, install the official CLI (`pip install asb-cli`) and point it at the running stack with `ASB_API_KEY=... asb usage`.
+
+See also: `docker-compose.yml`, `.env.example` (compose section), and `SPEC.md` §16 (Verification Plan).
+
 ## API Examples
+
 
 Health check:
 

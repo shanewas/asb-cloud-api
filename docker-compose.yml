@@ -1,0 +1,76 @@
+# Docker Compose stack for local PostgreSQL smoke testing and contributor verification.
+#
+# This provides a realistic PostgreSQL-backed environment matching production
+# persistence (migrations, API keys, sessions, usage records, audit log).
+#
+# Usage (from a fresh clone):
+#   1. (Optional) A dev-only valid Fernet key is preconfigured below.
+#      To rotate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#      Then verify: python -c "from cryptography.fernet import Fernet; Fernet('your-new-key')"
+#   2. docker compose up -d --build
+#   3. Wait ~10-15s for DB + migrations + API startup.
+#   4. View the auto-created dev key:
+#        docker compose logs api | grep -i "default test api key"
+#   5. Run the smoke flow (see README.md "PostgreSQL Smoke Stack" section).
+#   6. Teardown + clean slate:
+#        docker compose down -v
+#
+# WARNING: The credentials and keys below are DEVELOPMENT / SMOKE ONLY.
+#          Never use these values in production, staging, or any shared environment.
+#          Rotate COOKIE_ENCRYPTION_KEY for anything beyond your laptop.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: asb-postgres
+    environment:
+      POSTGRES_DB: asb_dev
+      POSTGRES_USER: asb
+      POSTGRES_PASSWORD: asb_dev_only_change_me
+    ports:
+      - "5432:5432"   # Expose for local psql / debugging if desired
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asb -d asb_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: asb-api
+    ports:
+      - "8000:8000"
+    environment:
+      # PostgreSQL connection (uses Docker service name as hostname)
+      DATABASE_URL: postgresql://asb:asb_dev_only_change_me@postgres:5432/asb_dev
+      # Dev-only valid Fernet key for smoke stack (rotate for any real use).
+      # Verified valid: python -c "from cryptography.fernet import Fernet; Fernet('DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo=')"
+      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-DenyyNaEkOmFHIuLm3YXfuCA7D7nZNtgKKmYfUsp8eo=}
+      ASB_CONFIG_PATH: config.yaml
+      ASB_SCREENSHOT_DIR: /tmp/screenshots
+      # Optional: enable billing only if you have Stripe test keys
+      # STRIPE_SECRET_KEY: ...
+      # etc.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Give the app a moment on first boot; the Python startup handles migrations
+    # and will create a default dev API key on first run.
+    restart: unless-stopped
+    # Optional: healthcheck using the public endpoint (no auth required)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  postgres_data:
+    # Named volume - 'docker compose down -v' will remove it for a completely clean slate.
